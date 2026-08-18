@@ -23,7 +23,7 @@ interface Preset {
 export const PRESETS: Record<string, Preset> = {
     gemini: {
         baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         keyEnv: "GEMINI_API_KEY",
     },
     groq: {
