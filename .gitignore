@@ -11,3 +11,6 @@ node_modules/
 .env.*.local
 # Auth Session
 .auth/
+# Agente AQA
+agent/artifacts/
+tests/generated/*.invalid

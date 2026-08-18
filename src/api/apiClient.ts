@@ -7,9 +7,7 @@ export class ApiClient {
     static async create(token?: string): Promise<ApiClient> {
         const context = await request.newContext({
             baseURL: env.baseURL,
-            extraHTTPHeaders: token
-            ? { Authorization: `Bearer ${token}`}
-            : {},
+            extraHTTPHeaders: token ? { Authorization: `Bearer ${token}` } : {},
         });
         return new ApiClient(context);
     }
@@ -20,7 +18,7 @@ export class ApiClient {
         return res.json() as Promise<T>;
     }
 
-    async post<T>(url: string, data:  unknown): Promise<T> {
+    async post<T>(url: string, data: unknown): Promise<T> {
         const res = await this.context.post(url, { data });
         this.assertOk(res.status(), url, "POST");
         return res.json() as Promise<T>;
@@ -36,7 +34,7 @@ export class ApiClient {
     }
 
     private assertOk(status: number, url: string, method: string): void {
-        if (status < 200 || status > 300) {
+        if (status < 200 || status >= 300) {
             throw new Error(`${method} ${url} failed with status ${status}`);
         }
     }

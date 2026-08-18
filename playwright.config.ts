@@ -5,86 +5,76 @@ import { env } from "./src/config/env";
 dotenv.config();
 
 /**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
+ * Los archivos *.setup.ts son proyectos de setup (login, seeding), no pruebas.
+ * Se excluyen de los proyectos de navegador para que `npx playwright test` no
+ * los ejecute como si fueran specs.
  */
-// import dotenv from 'dotenv';
-// import path from 'path';
-// dotenv.config({ path: path.resolve(__dirname, '.env') });
+const IGNORE_SETUP_FILES = /.*\.setup\.ts/;
 
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
-  testDir: "./tests",
-  /* Run tests in files in parallel */
-  fullyParallel: true,
-  /* Fail the build on CI if you accidentally left test.only in the source code. */
-  forbidOnly: !!process.env.CI,
-  /* Retry on CI only */
-  retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 4 : undefined,
-  /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: [
-    ["list"],
-    ["html", { open: "never"}],
-    ["json", { outputFile: "test-results/results.json"}],
-  ],
-  /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
-  use: {
-    /* Base URL to use in actions like `await page.goto('')`. */
-    // baseURL: 'http://localhost:3000',
-
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
-    baseURL: env.baseURL,
-    trace: "on-first-retry",
-    screenshot: "only-on-failure",
-    video: "retain-on-failure",
-  },
-
-  /* Configure projects for major browsers */
-  projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+    testDir: "./tests",
+    /* Run tests in files in parallel */
+    fullyParallel: true,
+    /* Fail the build on CI if you accidentally left test.only in the source code. */
+    forbidOnly: !!process.env.CI,
+    /* Retry on CI only */
+    retries: process.env.CI ? 2 : 0,
+    /* Opt out of parallel tests on CI. */
+    workers: process.env.CI ? 4 : undefined,
+    /* Reporter to use. See https://playwright.dev/docs/test-reporters */
+    reporter: [
+        ["list"],
+        ["html", { open: "never" }],
+        ["json", { outputFile: "test-results/results.json" }],
+    ],
+    /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
+    use: {
+        baseURL: env.baseURL,
+        trace: "on-first-retry",
+        screenshot: "only-on-failure",
+        video: "retain-on-failure",
     },
 
-    {
-      name: "firefox",
-      use: { ...devices["Desktop Firefox"] },
-    },
+    /* Configure projects for major browsers */
+    projects: [
+        /**
+         * Login compartido (opt-in). Descomenta este proyecto y agrega
+         * `dependencies: ["setup"]` + `storageState: STORAGE_STATE` a los proyectos
+         * de navegador cuando el sitio bajo prueba requiera sesion.
+         */
+        // {
+        //   name: "setup",
+        //   testMatch: IGNORE_SETUP_FILES,
+        // },
+        {
+            name: "chromium",
+            testIgnore: IGNORE_SETUP_FILES,
+            use: { ...devices["Desktop Chrome"] },
+        },
 
-    {
-      name: "webkit",
-      use: { ...devices["Desktop Safari"] },
-    },
+        {
+            name: "firefox",
+            testIgnore: IGNORE_SETUP_FILES,
+            use: { ...devices["Desktop Firefox"] },
+        },
 
-    /* Test against mobile viewports. */
-    // {
-    //   name: 'Mobile Chrome',
-    //   use: { ...devices['Pixel 5'] },
-    // },
-    // {
-    //   name: 'Mobile Safari',
-    //   use: { ...devices['iPhone 12'] },
-    // },
+        {
+            name: "webkit",
+            testIgnore: IGNORE_SETUP_FILES,
+            use: { ...devices["Desktop Safari"] },
+        },
 
-    /* Test against branded browsers. */
-    // {
-    //   name: 'Microsoft Edge',
-    //   use: { ...devices['Desktop Edge'], channel: 'msedge' },
-    // },
-    // {
-    //   name: 'Google Chrome',
-    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    // },
-  ],
-
-  /* Run your local dev server before starting the tests */
-  // webServer: {
-  //   command: 'npm run start',
-  //   url: 'http://localhost:3000',
-  //   reuseExistingServer: !process.env.CI,
-  // },
+        /* Test against mobile viewports. */
+        // {
+        //   name: 'Mobile Chrome',
+        //   use: { ...devices['Pixel 5'] },
+        // },
+        // {
+        //   name: 'Mobile Safari',
+        //   use: { ...devices['iPhone 12'] },
+        // },
+    ],
 });

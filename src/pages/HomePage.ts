@@ -4,7 +4,6 @@ import { Page } from "@playwright/test";
 import { BasePage } from "./BasePage";
 import { FooterComponent } from "../components/FooterComponent";
 
-
 export class HomePage extends BasePage {
     readonly footer: FooterComponent;
 
@@ -16,5 +15,4 @@ export class HomePage extends BasePage {
     async open(): Promise<void> {
         await this.goto("/mx");
     }
-
 }

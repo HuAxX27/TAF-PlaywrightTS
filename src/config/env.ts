@@ -13,8 +13,15 @@ function required(name: string): string {
 export const env = {
     baseURL: required("BASE_URL"),
     testEnv: process.env.TEST_ENV ?? "dev",
-    credentials: {
-        email: required("USER_EMAIL"),
-        password: required("USER_PASSWORD"),
+    /**
+     * Lazy: solo se exige USER_EMAIL/USER_PASSWORD cuando una prueba realmente
+     * los usa. Asi el resto de la suite (y el agente, que invoca `playwright
+     * test --list`) corre sin credenciales configuradas.
+     */
+    get credentials(): { email: string; password: string } {
+        return {
+            email: required("USER_EMAIL"),
+            password: required("USER_PASSWORD"),
+        };
     },
 } as const;

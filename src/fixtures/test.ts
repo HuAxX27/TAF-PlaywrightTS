@@ -1,7 +1,7 @@
-import { test as base} from "@playwright/test"
-import { HomePage } from "../pages/HomePage"
-import { ApiClient } from "../api/apiClient"
-import { UserService } from "../api/services/userService"
+import { test as base } from "@playwright/test";
+import { HomePage } from "../pages/HomePage";
+import { ApiClient } from "../api/apiClient";
+import { UserService } from "../api/services/userService";
 
 type Fixtures = {
     homePage: HomePage;
@@ -16,13 +16,16 @@ export const test = base.extend<Fixtures>({
     },
 
     //Api Client
+    // El destructuring vacio es el idiom de Playwright para "este fixture no
+    // depende de ningun otro"; no-empty-pattern no lo entiende.
+    // eslint-disable-next-line no-empty-pattern
     apiClient: async ({}, use) => {
         const client = await ApiClient.create();
         await use(client);
         await client.dispose();
     },
 
-    userService: async ({ apiClient}, use) => {
+    userService: async ({ apiClient }, use) => {
         await use(new UserService(apiClient));
     },
 });

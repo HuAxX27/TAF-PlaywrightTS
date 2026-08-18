@@ -1,0 +1,96 @@
+import { availableProviders } from "./llm";
+import { runAgent, type RunOptions } from "./pipeline";
+
+const HELP = `
+Agente AQA - de la User Story a los tests automatizados
+
+  npm run agent -- <CLAVE-HISTORIA> [opciones]
+
+Opciones
+  --source=jira|file     De donde se lee la historia (default: STORY_SOURCE del .env)
+  --provider=<nombre>    Proveedor de IA: ${availableProviders().join(" | ")}
+  --dry-run              Analiza y reporta, pero no escribe ningun spec
+  --include-partial      Tambien genera codigo para los casos cubiertos a medias
+  -h, --help             Esta ayuda
+
+Ejemplos
+  npm run agent -- DEMO-1 --source=file --provider=mock
+  npm run agent -- DEMO-1 --source=file --provider=gemini
+  npm run agent -- CIN-1234 --source=jira --provider=codemie --dry-run
+`;
+
+type ParseResult =
+    | { status: "ok"; options: RunOptions }
+    | { status: "help" }
+    | { status: "error"; message: string };
+
+function parseArgs(argv: string[]): ParseResult {
+    const args = argv.slice(2);
+
+    if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
+        return { status: "help" };
+    }
+
+    const positional = args.filter((arg) => !arg.startsWith("--"));
+    const flag = (name: string): string | undefined =>
+        args
+            .find((arg) => arg.startsWith(`--${name}=`))
+            ?.split("=")
+            .slice(1)
+            .join("=");
+
+    if (positional.length === 0) {
+        return { status: "error", message: "Falta la clave de la historia (por ejemplo: DEMO-1)." };
+    }
+
+    return {
+        status: "ok",
+        options: {
+            storyKey: positional[0],
+            source: flag("source"),
+            provider: flag("provider"),
+            dryRun: args.includes("--dry-run"),
+            includePartial: args.includes("--include-partial"),
+        },
+    };
+}
+
+async function main(): Promise<void> {
+    const parsed = parseArgs(process.argv);
+
+    if (parsed.status === "help") {
+        console.log(HELP);
+        return;
+    }
+
+    if (parsed.status === "error") {
+        console.error(`\n${parsed.message}`);
+        console.log(HELP);
+        process.exitCode = 1;
+        return;
+    }
+
+    const result = await runAgent(parsed.options);
+
+    const failed = result.generated.filter((spec) => !spec.validation.ok);
+
+    console.log(`\nArtefactos en: ${result.artifactsDir}`);
+    console.log(`   02-test-cases.md   test cases para revision / Jira`);
+    console.log(`   04-coverage.md     matriz de trazabilidad`);
+    console.log(`   05-report.md       resumen de la corrida`);
+
+    if (failed.length > 0) {
+        console.log(
+            `\n${failed.length} spec(s) no pasaron la validacion y quedaron como .invalid.`
+        );
+        process.exitCode = 1;
+        return;
+    }
+
+    console.log("\nListo.");
+}
+
+main().catch((error: unknown) => {
+    console.error(`\nEl agente fallo: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+});
