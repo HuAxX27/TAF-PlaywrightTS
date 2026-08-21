@@ -10,14 +10,24 @@ proveedores está [README.md](README.md).
 
 El ciclo manual de AQA es siempre el mismo:
 
-> leer la historia → escribir los test cases → buscar si ya hay algo automatizado
-> que los cubra → escribir el spec de lo que falta → pelearse con que compile.
+> leer la historia (o el TC ya escrito) → diseñar/confirmar los test cases →
+> buscar si ya hay algo automatizado que los cubra → escribir el spec de lo que
+> falta, con sus Page Objects → pelearse con que compile.
 
 El agente automatiza ese ciclo completo y se detiene justo donde empieza el juicio
-humano: **revisar los locators y correr las pruebas contra el ambiente real**.
+humano: **correr las pruebas contra el ambiente real y confirmar el resultado**.
 
-Lo importante no es que "escribe tests con IA". Es que **no duplica**: antes de
-generar nada, inventaría lo que el framework ya tiene y compara caso por caso.
+Lo importante no es que "escribe tests con IA". Es que **no duplica** (antes de
+generar nada, inventaría lo que el framework ya tiene) y **no adivina locators**
+(explora la página real antes de escribir el spec).
+
+Tiene dos modos de entrada:
+
+- `--mode=story` (default): parte de una User Story y el LLM diseña los test
+  cases.
+- `--mode=testcase`: parte de un Test Case ya definido en Xray (o un CSV/JSON
+  local) y va directo a cobertura + generación. Este es el modo del comando
+  simplificado `npm run createTestScript -- <CLAVE>`.
 
 ---
 
@@ -93,10 +103,12 @@ No lleva estado en ningún lado: la fuente de verdad es el repositorio.
 
 ## 4. Qué dejó la corrida
 
-### `tests/generated/*.spec.ts`
+### `tests/<modulo>/*.spec.ts`
 
-Los specs nuevos. Con el proveedor `mock` traen `TODO` en lugar de acciones,
-porque el mock no razona — pero **compilan y Playwright los reconoce**:
+Los specs nuevos, agrupados por módulo (el prefijo `[modulo]` del título del TC,
+o el primer tag de dominio). Con el proveedor `mock` traen `TODO` en lugar de
+acciones, porque el mock no razona — pero **compilan y Playwright los
+reconoce**:
 
 ```ts
 import { test, expect } from "../../src/fixtures/test";
@@ -166,13 +178,25 @@ Los artefactos están en `.gitignore`: son salida de una corrida, no código.
 
 ## 5. El bucle completo de trabajo
 
+**Desde una User Story:**
+
 ```
 1. Llega la historia         ──►  npm run agent -- CIN-1234 --source=jira
 2. Revisas 02-test-cases.md  ──►  ajustas / apruebas / los subes a Jira
 3. Revisas 04-coverage.md    ──►  confirmas que lo "cubierto" está bien cubierto
-4. Revisas tests/generated/  ──►  arreglas locators, completas aserciones
-5. npx playwright test tests/generated   ──►  contra el ambiente real
-6. Mueves los aprobados a tests/  ──►  PR normal, review normal
+4. Revisas tests/<modulo>/   ──►  confirmas locators y aserciones contra el snapshot real
+5. npx playwright test       ──►  contra el ambiente real
+6. Apruebas el PR            ──►  quitas el comentario de marca, review normal
+```
+
+**Desde un TC ya definido en Xray:**
+
+```
+1. Llega el TC de Xray       ──►  npm run createTestScript -- CINE-34
+2. Revisas 04-coverage.md    ──►  confirmas que no hay una prueba parecida ya cubriendo esto
+3. Revisas tests/<modulo>/   ──►  confirmas locators y aserciones contra el snapshot real
+4. npx playwright test       ──►  contra el ambiente real
+5. Apruebas el PR            ──►  quitas el comentario de marca, review normal
 ```
 
 Los pasos 2, 4 y 5 son humanos y no se negocian. El agente quita el trabajo
@@ -246,7 +270,9 @@ LLM_BASE_URL=https://mi-gateway-interno/v1
 
 ---
 
-## 7. Conectar Jira
+## 7. Conectar Jira o Xray
+
+### Jira (modo `story`)
 
 ```bash
 STORY_SOURCE=jira
@@ -270,9 +296,28 @@ criterios de aceptación los busca, en orden:
 Si no encuentra criterios te avisa y sigue: los test cases salen más débiles,
 pero salen.
 
-### Sin Jira, con archivo
+### Xray (modo `testcase`)
 
-`agent/stories/<CLAVE>.md`:
+Xray Cloud guarda los pasos manuales de un Test issue fuera de los campos
+estándar de Jira — el token de Jira no los ve. Se necesita una API Key
+**global de Xray** (Xray → Settings → API Keys, distinta del token de Jira):
+
+```bash
+TESTCASE_SOURCE=xray
+XRAY_CLIENT_ID=...
+XRAY_CLIENT_SECRET=...
+```
+
+```bash
+npm run createTestScript -- CINE-34
+```
+
+Autentica contra `/api/v2/authenticate` y trae el Test (con `steps`, prioridad y
+labels) via `/api/v2/graphql`.
+
+### Sin Jira ni Xray, con archivo
+
+**Historias** (`agent/stories/<CLAVE>.md`):
 
 ```markdown
 # CIN-123 - Título de la historia
@@ -293,6 +338,10 @@ footer, legales
 
 También acepta `<CLAVE>.json` con la forma de `UserStory`.
 
+**Test cases** (`agent/testcases/<CLAVE>.json` o `<CLAVE>.csv`): el `.csv` es
+el export nativo de Xray (columnas `Action`, `Data`, `Expected Result`) — solo
+lo exportas de Xray y lo copias ahí, sin transcribir nada a mano.
+
 ---
 
 ## 8. Cómo funciona por dentro
@@ -301,42 +350,48 @@ También acepta `<CLAVE>.json` con la forma de `UserStory`.
 
 ```
 agent/
-  cli.ts                    parseo de argumentos y salida por consola
-  pipeline.ts               orquesta los 5 pasos  ← el corazón
+  cli.ts                    parseo de argumentos del comando generico (npm run agent)
+  createTestScript.ts       comando simple: TC de Xray -> spec (npm run createTestScript)
+  pipeline.ts               orquesta ambos modos (story / testcase), el corazon
   prompts.ts                todos los prompts, en un solo lugar
   report.ts                 render de los .md (test cases, cobertura, reporte)
   config.ts                 lee el .env y resuelve rutas
   types.ts                  UserStory, TestCase, CoverageItem, ...
 
   llm/
-    provider.ts             la interfaz LlmProvider + extracción de JSON/código
+    provider.ts             la interfaz LlmProvider + extraccion de JSON
     openAiCompatible.ts     una clase que cubre 6 proveedores
     mock.ts                 proveedor determinista, sin red
     index.ts                createProvider(): el switch por LLM_PROVIDER
 
   sources/
-    storySource.ts          la interfaz StorySource
+    storySource.ts          la interfaz StorySource (modo story)
     jiraSource.ts           Jira Cloud v3 + aplanado de ADF
-    fileSource.ts           markdown / json local
+    fileSource.ts           markdown / json local (historias)
+    testCaseSource.ts       la interfaz TestCaseSource (modo testcase)
+    xrayTestCaseSource.ts   Xray Cloud GraphQL (Test + pasos manuales)
+    fileTestCaseSource.ts   json / csv local (TCs, formato export de Xray)
 
   framework/
-    inventory.ts            qué pruebas existen ya
-    context.ts              qué sabe el modelo de TU framework
+    inventory.ts            que pruebas existen ya
+    context.ts              que sabe el modelo de TU framework
+    explore.ts              exploracion en vivo del sitio (snapshot de accesibilidad)
+    fileBundle.ts           parseo del bundle multi-archivo (spec + soporte)
     validate.ts             la puerta de calidad
-    shell.ts                ejecución de comandos con timeout
+    shell.ts                ejecucion de comandos con timeout
 ```
 
-### 8.2 Los cinco pasos
+### 8.2 Los pasos del pipeline
 
 | #   | Paso                     | ¿Usa LLM? | Qué hace                                                                 |
 | --- | ------------------------ | --------- | ------------------------------------------------------------------------ |
-| 1   | Leer la historia         | no        | Jira o archivo → objeto `UserStory` con criterios separados              |
-| 2   | Diseñar test cases       | **sí**    | un TC por comportamiento verificable, con nivel, prioridad, tags y pasos |
-| 3   | Inventariar el framework | no        | `playwright test --list --reporter=json`                                 |
-| 4   | Analizar cobertura       | **sí**    | cada TC → `covered` / `partial` / `missing`, con justificación           |
-| 5   | Generar y validar        | **sí**    | solo lo `missing`, y luego `tsc` + `eslint` + `playwright --list`        |
+| 1   | Leer la entrada          | modo `story`: sí | `story`: Jira/archivo → `UserStory`. `testcase`: Xray/archivo → `TestCase[]` ya listos |
+| 2   | Inventariar el framework | no        | `playwright test --list --reporter=json`                                 |
+| 3   | Analizar cobertura       | **sí**    | cada TC → `covered` / `partial` / `missing`, con justificación           |
+| 4   | Explorar el sitio en vivo| no        | Chromium headless → snapshot de accesibilidad de la página bajo prueba   |
+| 5   | Generar y validar        | **sí**    | solo lo `missing` (o `partial` con `--include-partial`): spec + Page Objects/fixtures que falten, luego `tsc` + `eslint` + `playwright --list` |
 
-Dos detalles de diseño que importan:
+Detalles de diseño que importan:
 
 - **El inventario no lo hace la IA.** Se le pregunta a Playwright, que es la
   única fuente que sabe de verdad qué pruebas existen (incluidas las generadas
@@ -346,6 +401,8 @@ Dos detalles de diseño que importan:
 - **Un TC sin veredicto se trata como `missing`.** Si el modelo devuelve una
   respuesta incompleta, preferimos revisar un spec de más a perder cobertura en
   silencio.
+- **La exploración le da al LLM la verdad del sitio**, no una suposición: los
+  locators generados deben poder resolverse con los roles/textos del snapshot.
 
 ### 8.3 Por qué cambiar de proveedor es una línea
 
@@ -372,41 +429,51 @@ resto del agente no se entera.
 
 ### 8.4 El ciclo validar → reparar
 
-Sin esto, el agente solo "escribe archivos". El código generado pasa por las
-mismas puertas que el código humano, en este orden
-([`framework/validate.ts`](framework/validate.ts)):
+Sin esto, el agente solo "escribe archivos". El código generado (spec + todo
+archivo de soporte que se haya tocado) pasa por las mismas puertas que el
+código humano, en este orden ([`framework/validate.ts`](framework/validate.ts)):
 
-1. `playwright test --list <archivo>` — Playwright puede cargarlo y ve al menos
+1. `playwright test --list <spec>` — Playwright puede cargarlo y ve al menos
    una prueba declarada.
-2. `npx tsc --noEmit` — compila en modo strict (se filtran las líneas de error
-   que pertenecen al archivo generado).
-3. `npx eslint <archivo>` — respeta las reglas del repo.
+2. `npx tsc --noEmit` — compila en modo strict sobre todo el proyecto (si un
+   Page Object nuevo rompe otro spec existente, se detecta aquí).
+3. `npx eslint <spec> <soporte...>` — respeta las reglas del repo.
 
-Si algo falla, **los errores reales se le devuelven al modelo** junto con el
-código y el contexto del framework, y se reintenta (`MAX_REPAIR_ATTEMPTS`,
-default 2). No se le pide que adivine: se le pasa el mensaje exacto de `tsc`.
+Si algo falla, **los errores reales se le devuelven al modelo** junto con todos
+los archivos del bundle y el contexto del framework, y se reintenta
+(`MAX_REPAIR_ATTEMPTS`, default 2). No se le pide que adivine: se le pasa el
+mensaje exacto de `tsc`.
 
-Si después de los reintentos sigue roto, el archivo se guarda como
-`.spec.ts.invalid`. Se conserva para que lo revises, pero **queda fuera del
-alcance de Playwright**: un archivo generado nunca deja tu suite en rojo. El
+Si después de los reintentos sigue roto: el spec se guarda como
+`.spec.ts.invalid` (fuera del alcance de Playwright) y **los archivos de
+soporte se revierten a su contenido original** (o se borran, si el agente los
+creó). Un intento fallido nunca deja tu suite en rojo ni el framework roto. El
 proceso termina con código de salida 1 para que CI lo note.
 
 ### 8.5 Cómo sabe el modelo escribir _en tu_ framework
 
-[`framework/context.ts`](framework/context.ts) arma, en cada corrida, un paquete
-de contexto con:
+Dos fuentes de verdad se combinan en cada corrida:
+
+**[`framework/context.ts`](framework/context.ts)** arma un paquete estático con:
 
 - las convenciones del repo, escritas explícitamente;
 - el archivo de fixtures completo;
 - todos los Page Objects, componentes, capa API y factories de datos;
-- **un spec tuyo ya escrito**, el más grande, como modelo a imitar (nunca uno
-  generado: sería aprender de su propia copia).
+- **un spec tuyo ya escrito** (nunca uno generado, identificado por el
+  comentario `// Generado por el Agente AQA`), como modelo a imitar.
 
-Todo eso se trunca a `MAX_CONTEXT_CHARS` (24 000 por defecto). Por eso el código
-generado usa `homePage.footer.…` en vez de inventar selectores CSS: los está
-leyendo de tu código. Cuando necesita un locator que no existe, la instrucción es
-dejar `// TODO: agregar locator a <Componente>` — preferimos un TODO visible a un
-selector inventado que pasa la compilación y falla en ejecución.
+Todo eso se trunca a `MAX_CONTEXT_CHARS` (24 000 por defecto).
+
+**[`framework/explore.ts`](framework/explore.ts)** arma un snapshot dinámico:
+abre la página real en un Chromium headless y captura su árbol de accesibilidad
+(roles, textos, `[ref=eN]`) — el mismo formato que usa el MCP de Playwright. Si
+el TC habla de login, primero intenta un click en un trigger razonable para
+revelar esa UI antes de la foto.
+
+Con ambos, el modelo puede reusar `homePage.footer.…` cuando ya existe, o crear
+un Page Object nuevo con locators que apuntan a elementos que **de verdad están
+en la página**, en vez de inventar selectores CSS. Solo se permite un
+`// TODO` cuando la exploración en vivo falló (sin `BASE_URL`, sitio caído).
 
 ---
 
@@ -429,6 +496,10 @@ mistral: {
 **Agregar una fuente de historias** (Azure DevOps, Rally, un CSV) → implementa
 `StorySource` en `sources/` y regístrala en `sources/index.ts`.
 
+**Agregar una fuente de test cases ya definidos** (Zephyr, TestRail) →
+implementa `TestCaseSource` en `sources/` y regístrala en
+`createTestCaseSource()` (`sources/index.ts`).
+
 **Cambiar cómo piensa el agente** → todo está en
 [`prompts.ts`](prompts.ts), sin código mezclado. Si tu equipo tiene una plantilla
 de test cases (Gherkin, formato de Xray), se cambia ahí.
@@ -437,34 +508,48 @@ de test cases (Gherkin, formato de Xray), se cambia ahí.
 
 ## 10. Referencia rápida
 
-### Flags
+### Comandos
 
-| Flag                  | Qué hace                                                    |
-| --------------------- | ----------------------------------------------------------- |
-| `--source=jira\|file` | de dónde sale la historia                                   |
-| `--provider=<nombre>` | `mock`, `gemini`, `groq`, `openrouter`, `ollama`, `codemie` |
-| `--dry-run`           | analiza y reporta, no escribe código                        |
-| `--include-partial`   | también genera specs para los casos cubiertos a medias      |
-| `-h`, `--help`        | ayuda                                                       |
+| Comando                              | Equivale a                                                          |
+| ------------------------------------- | -------------------------------------------------------------------- |
+| `npm run createTestScript -- <CLAVE>` | `agent --mode=testcase --source=xray --provider=codemie --include-partial` |
+| `npm run agent -- <CLAVE> [flags]`    | comando genérico, cualquier combinación de flags                    |
+| `npm run agent:demo`                  | `agent DEMO-1 --source=file --provider=mock`                        |
 
-Sin flags, toma los valores del `.env`.
+### Flags (`npm run agent`)
+
+| Flag                     | Qué hace                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| `--mode=story\|testcase` | `story` diseña TCs desde una User Story (default). `testcase` usa un TC ya definido |
+| `--source=<nombre>`      | modo `story`: `jira\|file`. modo `testcase`: `xray\|file`                     |
+| `--provider=<nombre>`    | `mock`, `gemini`, `groq`, `openrouter`, `ollama`, `codemie`, `custom`         |
+| `--dry-run`              | analiza y reporta, no escribe código                                         |
+| `--include-partial`      | también genera specs para los casos cubiertos a medias                        |
+| `-h`, `--help`           | ayuda                                                                          |
+
+Sin flags, toma los valores del `.env`. La subcarpeta de `tests/` se toma del
+prefijo `[modulo]` en el título del TC, o del primer tag de dominio.
 
 ### Variables de entorno
 
-| Variable              | Default           | Para qué                                |
-| --------------------- | ----------------- | --------------------------------------- |
-| `LLM_PROVIDER`        | `mock`            | qué proveedor usar                      |
-| `LLM_MODEL`           | según proveedor   | sobrescribe el modelo                   |
-| `LLM_BASE_URL`        | según proveedor   | sobrescribe el endpoint                 |
-| `LLM_API_KEY`         | —                 | key genérica (gana sobre la del preset) |
-| `LLM_TEMPERATURE`     | `0.2`             | creatividad; bajo = más determinista    |
-| `LLM_TIMEOUT_MS`      | `120000`          | timeout por llamada                     |
-| `MAX_REPAIR_ATTEMPTS` | `2`               | reintentos de reparación por spec       |
-| `MAX_CONTEXT_CHARS`   | `24000`           | tope del contexto del framework         |
-| `STORY_SOURCE`        | `file`            | `jira` o `file`                         |
-| `STORY_DIR`           | `agent/stories`   | dónde viven las historias locales       |
-| `GENERATED_TESTS_DIR` | `tests/generated` | dónde caen los specs nuevos             |
-| `ARTIFACTS_DIR`       | `agent/artifacts` | dónde caen los reportes                 |
+| Variable              | Default                    | Para qué                                |
+| --------------------- | --------------------------- | --------------------------------------- |
+| `LLM_PROVIDER`        | `mock`                      | qué proveedor usar                      |
+| `LLM_MODEL`           | según proveedor              | sobrescribe el modelo                   |
+| `LLM_BASE_URL`        | según proveedor              | sobrescribe el endpoint                 |
+| `LLM_API_KEY`         | —                            | key genérica (gana sobre la del preset) |
+| `LLM_TEMPERATURE`     | `0.2`                        | creatividad; bajo = más determinista    |
+| `LLM_TIMEOUT_MS`      | `120000`                     | timeout por llamada                     |
+| `MAX_REPAIR_ATTEMPTS` | `2`                          | reintentos de reparación por spec       |
+| `MAX_CONTEXT_CHARS`   | `24000`                      | tope del contexto del framework         |
+| `STORY_SOURCE`        | `file`                       | `jira` o `file` (modo `story`)          |
+| `STORY_DIR`           | `agent/stories`              | dónde viven las historias locales       |
+| `TESTCASE_SOURCE`     | `file`                       | `xray` o `file` (modo `testcase`)       |
+| `TESTCASE_DIR`        | `agent/testcases`            | dónde viven los TCs locales (.json/.csv) |
+| `XRAY_BASE_URL`       | `https://xray.cloud.getxray.app` | endpoint de Xray Cloud             |
+| `XRAY_CLIENT_ID`      | —                            | API Key global de Xray (Settings > API Keys) |
+| `XRAY_CLIENT_SECRET`  | —                            | secreto de esa misma API Key            |
+| `ARTIFACTS_DIR`       | `agent/artifacts`            | dónde caen los reportes                 |
 
 ---
 
@@ -475,10 +560,12 @@ Sin flags, toma los valores del `.env`.
 | `Missing required env variable: BASE_URL`            | falta el `.env`. `cp .env.example .env`                                                         |
 | `Falta la API key del proveedor "gemini"`            | define `GEMINI_API_KEY` (o `LLM_API_KEY`) en el `.env`                                          |
 | `No encontre la historia "X"`                        | crea `agent/stories/X.md`, o usa `--source=jira`                                                |
+| `No encontre test cases definidos para "X"`          | crea `agent/testcases/X.json`/`.csv`, o usa `--source=xray`                                     |
 | `! no se pudo listar con Playwright`                 | el inventario cayó al respaldo por regex; suele ser `BASE_URL` ausente o un spec que no compila |
 | Todo sale `missing` aunque hay pruebas que lo cubren | revisa `03-inventory.json`: si está vacío, el problema es el inventario, no el análisis         |
-| El modelo devuelve texto en vez de JSON              | baja `LLM_TEMPERATURE`, o usa un modelo más grande con `LLM_MODEL`                              |
+| El modelo devuelve texto en vez del bundle `FILE:`   | baja `LLM_TEMPERATURE`, o usa un modelo más grande con `LLM_MODEL`                              |
 | Specs `.spec.ts.invalid`                             | mira `05-report.md`: trae los errores de `tsc`/`eslint` que no se pudieron reparar              |
+| `! exploracion en vivo fallo`                        | revisa `BASE_URL` en el `.env` y que el sitio responda; el spec se genera con un TODO en ese caso |
 | Timeout con `ollama`                                 | el primer request carga el modelo en memoria; sube `LLM_TIMEOUT_MS`                             |
 
 ---
@@ -488,16 +575,17 @@ Sin flags, toma los valores del `.env`.
 1. **El problema** (30 s) — muestra `stories/DEMO-1.md` y
    `tests/footerLegales.spec.ts`: siete criterios, y algo ya automatizado. La
    pregunta cara es _qué falta_, no _cómo se escribe un test_.
-2. **Una corrida** (1 min) — `npm run agent:demo`. Señala el paso 4: 6 cubiertos,
-   2 faltantes.
+2. **Una corrida** (1 min) — `npm run agent:demo`. Señala el paso de cobertura:
+   6 cubiertos, 2 faltantes.
 3. **La matriz** (1 min) — abre `agent/artifacts/DEMO-1/04-coverage.md`. Esa
    tabla se arma a mano en cada sprint.
-4. **El código** (1 min) — abre un spec de `tests/generated/`: usa los fixtures y
-   los Page Objects que ya existen, no Playwright genérico.
+4. **El código** (1 min) — abre el spec generado en `tests/<modulo>/`: usa los
+   fixtures y los Page Objects que ya existen, no Playwright genérico.
 5. **La deduplicación** (1 min) — corre `npm run agent:demo` otra vez: cero
    generados. El agente no repite trabajo.
-6. **El cierre** (30 s) — `LLM_PROVIDER=codemie` en el `.env` y el mismo pipeline
-   corre sobre la infraestructura de EPAM, sin cambiar código.
+6. **El cierre** (30 s) — `npm run createTestScript -- CINE-34` con un TC real de
+   Xray: explora el sitio en vivo, genera el spec y el Page Object que falte, y
+   corre sobre la infraestructura de CodeMie, sin cambiar código.
 
 Si tienes una key de Gemini a mano, corre el paso 2 con `--provider=gemini` para
 que el código generado tenga aserciones reales en vez de `TODO`.
@@ -507,12 +595,14 @@ que el código generado tenga aserciones reales en vez de `TODO`.
 ## 13. Límites honestos
 
 - El agente **no ejecuta** los tests contra el ambiente: valida que compilen y
-  que Playwright los reconozca. Correrlos es tuyo.
+  que Playwright los reconozca. Correrlos y confirmar el resultado es tuyo.
 - La cobertura la decide un LLM sobre **títulos y tags**, no sobre el cuerpo de
   cada prueba. Un caso marcado `covered` merece una mirada antes de descartarlo.
 - El proveedor `mock` no razona: aplica reglas fijas (un TC por criterio,
   coincidencia léxica para la cobertura). Los falsos positivos que veas en el
   demo son de esa regla, no del diseño del pipeline.
-- Los locators que el modelo no encuentra quedan como `TODO`. Es intencional.
+- La exploración en vivo ve la página en el momento de generar el spec; si el
+  trigger de login no se encuentra, el modelo deja una precondición explicando
+  la suposición, no un TODO vacío.
 - Nada de esto reemplaza el criterio de un QA para decidir **qué vale la pena
   probar**. El agente propone; tú decides.

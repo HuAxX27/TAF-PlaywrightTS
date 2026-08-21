@@ -31,8 +31,9 @@ prueba realmente los usa.
 | `npm run typecheck`               | `tsc --noEmit`                              |
 | `npm run lint` / `lint:fix`       | ESLint                                      |
 | `npm run format` / `format:check` | Prettier                                    |
-| `npm run agent -- <HISTORIA>`     | Agente AQA                                  |
-| `npm run agent:demo`              | Agente AQA en modo demo, sin red ni API key |
+| `npm run agent -- <CLAVE> [flags]`     | Agente AQA, comando genérico (User Story o TC ya definido) |
+| `npm run createTestScript -- <CLAVE>`  | Agente AQA, comando simple: TC de Xray -> spec completo     |
+| `npm run agent:demo`                   | Agente AQA en modo demo, sin red ni API key                 |
 
 ## Estructura
 
@@ -45,8 +46,10 @@ src/
   fixtures/     test.ts: los fixtures que consumen los specs
   config/       env.ts (variables) y paths.ts (storage state)
 tests/
-  *.spec.ts     Specs revisados por humanos
-  generated/    Salida del agente, pendiente de revisión
+  *.spec.ts       Specs escritos a mano
+  <modulo>/       Specs por dominio (footer, login, ...); pueden mezclar
+                  escritos a mano y generados por el agente (marcados con
+                  el comentario "// Generado por el Agente AQA")
 agent/          El agente AQA (ver agent/README.md)
 ```
 
@@ -69,15 +72,16 @@ de los proyectos de navegador; para activarlos descomenta el proyecto `setup` en
 ## Agente AQA
 
 ```bash
-npm run agent:demo
+npm run agent:demo                      # demo offline, sin red ni API key
+npm run createTestScript -- CINE-34     # TC real de Xray -> spec completo
 ```
 
 ```
-User Story (Jira o archivo)
-   → test cases            (LLM)
-   → inventario de tests   (playwright test --list)
-   → análisis de cobertura (LLM)  covered / partial / missing
-   → specs para lo faltante (LLM)
+User Story (Jira/archivo)  o  Test Case ya definido (Xray/archivo)
+   → inventario de tests     (playwright test --list)
+   → análisis de cobertura   (LLM)  covered / partial / missing
+   → exploración en vivo     (Chromium headless -> snapshot de accesibilidad)
+   → spec + Page Objects/fixtures que falten   (LLM)
    → validación real: tsc + eslint + playwright --list, con reintentos de reparación
 ```
 

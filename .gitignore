@@ -13,4 +13,4 @@ node_modules/
 .auth/
 # Agente AQA
 agent/artifacts/
-tests/generated/*.invalid
+tests/**/*.invalid

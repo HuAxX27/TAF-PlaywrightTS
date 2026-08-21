@@ -87,47 +87,87 @@ Responde UNICAMENTE con un array JSON:
 export interface CodegenContext {
     frameworkContext: string;
     importPath: string;
-    fileName: string;
+    specRelPath: string;
+    /** Snapshot real de accesibilidad de la pagina bajo prueba, o vacio si no se pudo explorar. */
+    pageExploration?: string;
+    explorationWarning?: string;
 }
 
-/** Paso 3: Test Case faltante -> spec de Playwright. */
+const FILE_FORMAT_RULES = `Responde con uno o mas bloques con este formato EXACTO, uno por archivo:
+
+FILE: <ruta relativa desde la raiz del repo>
+\`\`\`typescript
+<contenido completo del archivo>
+\`\`\`
+
+- El primer bloque SIEMPRE es el spec, con ruta exacta "NOMBRE_ARCHIVO" (ver mas abajo).
+- Solo puedes crear o modificar archivos dentro de: src/pages/, src/components/, src/data/, src/fixtures/.
+- No reescribas un archivo existente completo si solo necesitas agregarle un metodo o locator:
+  copia el archivo completo con tu cambio aplicado (el bundle reemplaza el archivo entero).
+- No incluyas explicaciones fuera de los bloques FILE.`;
+
+/** Paso 3: Test Case faltante -> spec de Playwright + Page Objects/Components/fixtures que falten. */
 export function codegenPrompt(testCase: TestCase, context: CodegenContext): string {
     return `TAREA: ${TASK.codegen}
 
-Escribe el spec de Playwright para este test case:
+Escribe el spec de Playwright para este test case, y CUALQUIER Page Object, componente,
+locator o fixture que le falte al framework para que el spec funcione de punta a punta
+sin dejar ningun TODO. El humano solo debe correr el test y revisar el resultado.
 
 ${json(testCase)}
 
 RUTA_IMPORT_FIXTURES: ${context.importPath}
-NOMBRE_ARCHIVO: ${context.fileName}
+NOMBRE_ARCHIVO: ${context.specRelPath}
 
 Asi esta construido el framework. Reutiliza lo que ya existe; no dupliques page objects ni locators:
 
 ${context.frameworkContext}
-
+${
+    context.pageExploration
+        ? `\nSNAPSHOT DE ACCESIBILIDAD REAL DE LA PAGINA (usa estos textos/roles exactos para los locators, NO inventes otros):\n\`\`\`\n${context.pageExploration}\n\`\`\`\n`
+        : ""
+}${
+    context.explorationWarning
+        ? `\nADVERTENCIA: no se pudo explorar la pagina en vivo (${context.explorationWarning}). Escribe los locators con el rol/texto mas probable segun el test case, y deja un comentario // TODO: verificar locator contra el sitio real.\n`
+        : ""
+}
 Reglas del codigo que devuelvas:
-- Importa test y expect desde "${context.importPath}", nunca desde "@playwright/test".
-- Usa los fixtures y page objects existentes. Si necesitas un locator que no existe, usa el
-  metodo o rol mas cercano ya disponible y deja un comentario // TODO: agregar locator a <Componente>.
-- Envuelve cada paso logico en test.step con una descripcion en espanol.
+- Importa test y expect desde "${context.importPath}" en el spec, nunca desde "@playwright/test".
+- Si el snapshot de accesibilidad esta disponible, TODOS los locators deben poder resolverse con
+  esos roles/textos reales. Si no esta disponible, es la UNICA situacion en la que puedes dejar un
+  TODO explicando que locator falta verificar.
+- Si necesitas un Page Object o Component que no existe, CREALO completo (constructor, locators,
+  metodos de accion) siguiendo el patron de los que ya existen en el framework.
+- Si necesitas agregar un metodo/locator a un Page Object o Component YA existente, reescribe ese
+  archivo completo con el cambio aplicado.
+- Si el TC necesita datos de prueba (usuarios, textos), usa o crea un factory en src/data/ con faker;
+  nunca hardcodees credenciales o datos sensibles directo en el spec.
+- Si el fixture de test.ts necesita registrar un Page Object nuevo, reescribelo completo con el
+  fixture agregado.
+- Envuelve cada paso logico del spec en test.step con una descripcion en espanol.
 - Declara los tags con la firma test("titulo", { tag: [...] }, async ({ ... }) => {}).
-- Nada de waitForTimeout, nada de selectores CSS fragiles, nada de datos hardcodeados que
-  puedan venir de src/data.
-- El archivo debe compilar con TypeScript en modo strict.
+- Nada de waitForTimeout, nada de selectores CSS fragiles.
+- Todo el codigo debe compilar con TypeScript en modo strict.
 
-Responde UNICAMENTE con el codigo TypeScript del archivo .spec.ts.`;
+${FILE_FORMAT_RULES}`;
 }
 
-/** Paso 4 (solo si la validacion fallo): reparar el codigo con el error real. */
-export function repairPrompt(code: string, errors: string[], context: CodegenContext): string {
+/** Paso 4 (solo si la validacion fallo): reparar el bundle completo con el error real. */
+export function repairPrompt(
+    files: Array<{ path: string; content: string }>,
+    errors: string[],
+    context: CodegenContext
+): string {
+    const filesBlock = files
+        .map((file) => `FILE: ${file.path}\n\`\`\`typescript\n${file.content}\n\`\`\``)
+        .join("\n\n");
+
     return `TAREA: ${TASK.repair}
 
-Este archivo generado no pasa la validacion del repositorio.
+Este bundle de archivos generado no pasa la validacion del repositorio.
 
-CODIGO ACTUAL:
-\`\`\`typescript
-${code}
-\`\`\`
+ARCHIVOS ACTUALES:
+${filesBlock}
 
 ERRORES REALES DE TypeScript / ESLint / Playwright:
 ${errors.map((error) => `- ${error}`).join("\n")}
@@ -137,7 +177,9 @@ Contexto del framework:
 ${context.frameworkContext}
 
 Corrige EXCLUSIVAMENTE lo que causa esos errores. No cambies la intencion de la prueba ni
-agregues escenarios nuevos. Importa desde "${context.importPath}".
+agregues escenarios nuevos. El spec importa desde "${context.importPath}".
 
-Responde UNICAMENTE con el codigo TypeScript corregido y completo.`;
+${FILE_FORMAT_RULES}
+
+Responde con TODOS los archivos corregidos y completos (spec + soporte), en el mismo formato.`;
 }

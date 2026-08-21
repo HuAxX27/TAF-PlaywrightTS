@@ -80,9 +80,8 @@ function findExampleSpec(dir: string): string | null {
         for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
             const fullPath = path.join(current, entry.name);
             if (entry.isDirectory()) {
-                if (path.resolve(fullPath) === agentConfig.generatedTestsDir) continue;
                 walk(fullPath);
-            } else if (entry.name.endsWith(".spec.ts")) {
+            } else if (entry.name.endsWith(".spec.ts") && !isGeneratedByAgent(fullPath)) {
                 candidates.push(fullPath);
             }
         }
@@ -91,4 +90,10 @@ function findExampleSpec(dir: string): string | null {
     walk(dir);
 
     return candidates.sort((a, b) => fs.statSync(b).size - fs.statSync(a).size)[0] ?? null;
+}
+
+/** Detecta el marcador que `pipeline.ts` escribe al tope de cada spec generado. */
+function isGeneratedByAgent(filePath: string): boolean {
+    const firstLine = fs.readFileSync(filePath, "utf-8").split(/\r?\n/, 1)[0];
+    return firstLine.includes("Generado por el Agente AQA");
 }

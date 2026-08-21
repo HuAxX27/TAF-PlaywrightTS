@@ -54,9 +54,3 @@ export function extractJson<T>(raw: string): T {
         `La respuesta del modelo no contiene JSON parseable. Respuesta cruda:\n${trimmed.slice(0, 800)}`
     );
 }
-
-/** Quita los cercos markdown de una respuesta que deberia ser solo codigo. */
-export function extractCode(raw: string): string {
-    const fenced = raw.match(/```(?:ts|typescript|javascript)?\s*([\s\S]*?)```/);
-    return (fenced ? fenced[1] : raw).trim();
-}

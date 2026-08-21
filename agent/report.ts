@@ -100,6 +100,9 @@ export function renderReport(result: AgentRunResult, provider: LlmProvider): str
             ? result.generated.map(
                   (spec) =>
                       `- ${spec.validation.ok ? "[OK]" : "[REVISAR]"} \`${spec.filePath}\` - ${spec.testCaseId} ${spec.title}` +
+                      (spec.supportFiles.length > 0
+                          ? `\n    - Soporte: ${spec.supportFiles.map((file) => `\`${file}\``).join(", ")}`
+                          : "") +
                       (spec.validation.ok
                           ? ""
                           : `\n    - ${spec.validation.errors.slice(0, 3).join("\n    - ")}`)
@@ -109,8 +112,9 @@ export function renderReport(result: AgentRunResult, provider: LlmProvider): str
         "## Siguiente paso",
         "",
         "1. Revisar los specs generados: los locators y aserciones necesitan ojo humano.",
-        "2. Correr `npx playwright test tests/generated` contra el ambiente real.",
-        "3. Mover los specs aprobados de `tests/generated/` a la carpeta definitiva.",
+        "   Se identifican por el comentario `// Generado por el Agente AQA` al tope del archivo.",
+        "2. Correr `npx playwright test` contra el ambiente real.",
+        "3. Quitar el comentario de marca una vez aprobado el spec.",
         "",
     ]
         .filter((line) => line !== "")

@@ -89,11 +89,12 @@ export class MockProvider implements LlmProvider {
         });
     }
 
-    /** Esqueleto valido: compila, se lista en Playwright y respeta el POM. */
+    /** Esqueleto valido: compila, se lista en Playwright y respeta el POM. Formato FILE: (ver fileBundle.ts). */
     private buildSpec(prompt: string): string {
         const testCase = jsonBlocks<TestCase>(prompt)[0];
         const importPath =
             prompt.match(/RUTA_IMPORT_FIXTURES:\s*(\S+)/)?.[1] ?? "../../src/fixtures/test";
+        const specRelPath = prompt.match(/NOMBRE_ARCHIVO:\s*(\S+)/)?.[1] ?? "tests/generated/tc.spec.ts";
         const title = testCase?.title ?? "Escenario generado";
         const tags = (testCase?.tags?.length ? testCase.tags : ["@regression"])
             .map((tag) => `"${tag}"`)
@@ -110,7 +111,7 @@ export class MockProvider implements LlmProvider {
             )
             .join("\n\n");
 
-        return `import { test, expect } from "${importPath}";
+        const spec = `import { test, expect } from "${importPath}";
 
 test.describe("${escape(testCase?.id ?? "TC")} - ${escape(title)}", () => {
     test.beforeEach(async ({ homePage }) => {
@@ -128,6 +129,8 @@ ${steps}
     });
 });
 `;
+
+        return `FILE: ${specRelPath}\n\`\`\`typescript\n${spec}\`\`\`\n`;
     }
 }
 

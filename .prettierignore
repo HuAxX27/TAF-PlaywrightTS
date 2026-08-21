@@ -6,4 +6,3 @@ dist/
 
 # Salida del agente AQA: se revisa a mano, no se formatea en CI
 agent/artifacts/
-tests/generated/

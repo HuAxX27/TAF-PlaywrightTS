@@ -4,7 +4,7 @@ import { OpenAiCompatibleProvider } from "./openAiCompatible";
 import type { LlmProvider } from "./provider";
 
 export type { LlmProvider, CompletionRequest } from "./provider";
-export { extractJson, extractCode } from "./provider";
+export { extractJson } from "./provider";
 
 interface Preset {
     baseUrl: string;

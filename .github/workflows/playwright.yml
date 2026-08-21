@@ -40,9 +40,11 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                   name: agent-artifacts
+                  # Los specs generados caen en tests/<modulo>/, marcados con
+                  # "// Generado por el Agente AQA" al tope del archivo.
                   path: |
                       agent/artifacts/
-                      tests/generated/
+                      tests/
                   retention-days: 7
 
     test:

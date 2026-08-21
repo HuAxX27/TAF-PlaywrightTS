@@ -53,6 +53,8 @@ export interface GeneratedSpec {
     testCaseId: string;
     title: string;
     filePath: string;
+    /** Page Objects/Components/fixtures nuevos o modificados junto con el spec. */
+    supportFiles: string[];
     validation: ValidationResult;
 }
 
