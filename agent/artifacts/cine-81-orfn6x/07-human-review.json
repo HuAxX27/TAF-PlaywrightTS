@@ -1,0 +1,109 @@
+[
+  {
+    "round": 1,
+    "stage": "test-cases",
+    "questions": [
+      {
+        "id": "Q-01",
+        "question": "¿Cuál es la URL de la página representativa que tiene footer para ejecutar este test?",
+        "why": "Sin una URL concreta, el test no puede ejecutarse. El Test Case indica '<PENDIENTE Q-01: página representativa>' pero no especifica cuál usar.",
+        "assumptionIfUnanswered": "Usar la URL del home '/' asumiendo que tiene footer con la sección Legales",
+        "relatedTestCaseIds": [
+          "CINE-81"
+        ],
+        "answer": "/mx",
+        "answeredByHuman": true
+      },
+      {
+        "id": "Q-02",
+        "question": "¿Cuál es la URL exacta del PDF de Términos y condiciones generales que debe abrirse?",
+        "why": "El Test Case requiere validar que la URL coincide con la esperada y termina en .pdf, pero indica '<PENDIENTE Q-02: URL esperada>' sin especificarla.",
+        "assumptionIfUnanswered": "Validar únicamente que la URL termina en '.pdf' y contiene 'terminos' o 'condiciones' en el path, sin validar URL exacta",
+        "relatedTestCaseIds": [
+          "CINE-81"
+        ],
+        "answer": "https://pimcore-content.cinepolis.com/assets/Legales/terminos-condiciones-cinepolis.pdf pero abre como un archivo, asi que no genera una pagina nueva solo un archivo pdf",
+        "answeredByHuman": true
+      },
+      {
+        "id": "Q-03",
+        "question": "¿El texto exacto del enlace es 'Términos y condiciones generales' o puede tener variaciones (mayúsculas, tildes, espacios)?",
+        "why": "Para localizar el elemento correctamente necesitamos saber si debemos buscar el texto exacto o si hay variaciones aceptables en el sitio real.",
+        "assumptionIfUnanswered": "Buscar por texto exacto 'Términos y condiciones generales' con coincidencia case-insensitive",
+        "relatedTestCaseIds": [
+          "CINE-81"
+        ],
+        "answer": "TerminosTérminos y condiciones",
+        "answeredByHuman": true
+      }
+    ],
+    "feedback": "es Términos y condiciones",
+    "approved": false
+  },
+  {
+    "round": 2,
+    "stage": "test-cases",
+    "questions": [
+      {
+        "id": "Q-02",
+        "question": "¿Cuál es la URL exacta del PDF de términos y condiciones que se espera abrir?",
+        "why": "El test debe validar que se abre el PDF correcto. Sin la URL esperada, no se puede verificar que el enlace apunta al documento correcto",
+        "assumptionIfUnanswered": "Se validará únicamente que la URL de la nueva pestaña termina en '.pdf' sin verificar la URL completa específica",
+        "relatedTestCaseIds": [
+          "CINE-81"
+        ],
+        "answer": "Se validará únicamente que la URL de la nueva pestaña termina en '.pdf' sin verificar la URL completa específica",
+        "answeredByHuman": false
+      },
+      {
+        "id": "Q-03",
+        "question": "¿El enlace debe tener exactamente el texto 'Términos y condiciones generales' o puede tener variaciones (mayúsculas, tildes, espacios)?",
+        "why": "Si el texto real en el sitio tiene alguna variación, el locator podría fallar al buscar el enlace exacto",
+        "assumptionIfUnanswered": "Se buscará el texto exacto 'Términos y condiciones generales' respetando mayúsculas, minúsculas y tildes",
+        "relatedTestCaseIds": [
+          "CINE-81"
+        ],
+        "answer": "Términos y condiciones",
+        "answeredByHuman": true
+      },
+      {
+        "id": "Q-04",
+        "question": "¿Se debe validar que el PDF se descarga correctamente o solo que se abre en una nueva pestaña?",
+        "why": "El comportamiento del navegador con PDFs puede variar (abrir en pestaña, descargar, abrir en visor). Esto afecta las aserciones del test",
+        "assumptionIfUnanswered": "Se validará únicamente que se abre una nueva pestaña con URL que termina en .pdf, sin validar descarga o contenido del PDF",
+        "relatedTestCaseIds": [
+          "CINE-81"
+        ],
+        "answer": "solo que se abra",
+        "answeredByHuman": true
+      }
+    ],
+    "approved": true
+  },
+  {
+    "round": 1,
+    "stage": "code",
+    "questions": [],
+    "feedback": "arregla el test al hacer click en Terminos y Condiciones en el footer debe abrir una ventana nueva con el pdf",
+    "approved": false
+  },
+  {
+    "round": 2,
+    "stage": "code",
+    "questions": [],
+    "feedback": "Arregla el test, el elemento a clickear esta en el footer en legale, llamado Términos y condiciones",
+    "approved": false
+  },
+  {
+    "round": 3,
+    "stage": "code",
+    "questions": [],
+    "approved": true
+  },
+  {
+    "round": 6,
+    "stage": "code",
+    "questions": [],
+    "approved": true
+  }
+]

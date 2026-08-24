@@ -1,0 +1,58 @@
+[
+  {
+    "testCaseId": "CINE-81",
+    "fullyCovered": false,
+    "coveragePercent": 71,
+    "scenarios": [
+      {
+        "scenario": "Abrir una página del sitio que tenga footer",
+        "status": "covered",
+        "evidence": "await page.goto(\"/mx\", { waitUntil: \"domcontentloaded\" }); await expect(page).toHaveURL(/\\/mx/);"
+      },
+      {
+        "scenario": "Se visualiza el footer",
+        "status": "missing",
+        "evidence": "",
+        "gap": "No hay expect que verifique que el footer es visible. Solo se hace scrollToFooter() pero sin aserción sobre this.footer"
+      },
+      {
+        "scenario": "La sección 'Legales' es visible",
+        "status": "covered",
+        "evidence": "await expect(footerComponent.legalesSection).toBeVisible();"
+      },
+      {
+        "scenario": "El elemento tiene target=\"_blank\"",
+        "status": "covered",
+        "evidence": "await expect(terminosLink).toHaveAttribute(\"target\", \"_blank\");"
+      },
+      {
+        "scenario": "Se abre una nueva pestaña",
+        "status": "missing",
+        "evidence": "",
+        "gap": "El código espera un evento 'download' pero no verifica que se abra una nueva pestaña. No hay page.waitForEvent('popup') ni context.waitForEvent('page')"
+      },
+      {
+        "scenario": "La URL termina en .pdf",
+        "status": "covered",
+        "evidence": "expect(downloadUrl).toContain(\".pdf\");"
+      },
+      {
+        "scenario": "La URL coincide con la URL esperada",
+        "status": "covered",
+        "evidence": "expect(downloadUrl).toBe(\"https://pimcore-content.cinepolis.com/assets/Legales/terminos-condiciones-cinepolis.pdf\");"
+      }
+    ],
+    "missingScenarios": [
+      "No hay expect que verifique que el footer es visible. Solo se hace scrollToFooter() pero sin aserción sobre this.footer",
+      "El código espera un evento 'download' pero no verifica que se abra una nueva pestaña. No hay page.waitForEvent('popup') ni context.waitForEvent('page')",
+      "Verificar que el footer es visible",
+      "Verificar que se abre una nueva pestaña (popup/tab)"
+    ],
+    "extraBehaviors": [
+      "Valida que el enlace 'Términos y condiciones' es visible (no pedido explícitamente en expectedResult)",
+      "Maneja el comportamiento como descarga (download event) en lugar de nueva pestaña, lo cual puede no coincidir con el comportamiento real del navegador para PDFs con target=_blank"
+    ],
+    "verdict": "El código cubre 5 de 7 escenarios. Falta verificar que el footer es visible y que se abre una nueva pestaña. Además, el enfoque de 'download' puede no ser correcto si el PDF se abre en pestaña nueva en lugar de descargarse.",
+    "approvedByHuman": true
+  }
+]

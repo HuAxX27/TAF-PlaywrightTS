@@ -1,16 +1,138 @@
 {
-    "version": "2.0.0",
-    "updatedAt": "2026-08-24T00:00:00.000Z",
-    "rules": [],
-    "recipes": [],
-    "facts": [],
-    "stats": {
-        "sessions": 0,
-        "specsGenerated": 0,
-        "specsPassedFirstTry": 0,
-        "totalRepairAttempts": 0,
-        "averageRepairAttempts": 0,
-        "questionsAvoidedByFacts": 0
+  "version": "2.0.0",
+  "updatedAt": "2026-08-24T21:47:03.429Z",
+  "rules": [
+    {
+      "id": "R-001",
+      "scope": "ui",
+      "category": "assertions",
+      "rule": "Usa toHaveAttribute(atributo, valor) en lugar de getAttribute() + expect().toBe() para verificar atributos HTML",
+      "trigger": "Error de ESLint 'playwright/prefer-web-first-assertions' al usar getAttribute() seguido de expect",
+      "origin": "repair",
+      "confirmations": 1,
+      "violationsAfterLearning": 0,
+      "firstSeen": "2026-08-24T21:47:03.427Z",
+      "lastSeen": "2026-08-24T21:47:03.427Z",
+      "sessions": [
+        "CINE-81"
+      ]
     },
-    "history": []
+    {
+      "id": "R-002",
+      "scope": "ui",
+      "category": "navigation",
+      "rule": "Cuando un enlace con target='_blank' descarga un archivo PDF directamente (no abre pestaña), usa page.waitForEvent('download') en lugar de page.waitForEvent('popup')",
+      "trigger": "El test case indica que se abre PDF en nueva pestaña pero el comportamiento real es descarga de archivo",
+      "origin": "human",
+      "confirmations": 1,
+      "violationsAfterLearning": 0,
+      "firstSeen": "2026-08-24T21:47:03.427Z",
+      "lastSeen": "2026-08-24T21:47:03.427Z",
+      "sessions": [
+        "CINE-81"
+      ]
+    },
+    {
+      "id": "R-003",
+      "scope": "ui",
+      "category": "assertions",
+      "rule": "Verifica visibilidad del contenedor padre (footer, header, modal) antes de interactuar con elementos hijos dentro de él",
+      "trigger": "coverageGaps reporta 'No hay expect que verifique que el footer es visible'",
+      "origin": "coverage-gap",
+      "confirmations": 1,
+      "violationsAfterLearning": 0,
+      "firstSeen": "2026-08-24T21:47:03.427Z",
+      "lastSeen": "2026-08-24T21:47:03.427Z",
+      "sessions": [
+        "CINE-81"
+      ]
+    }
+  ],
+  "recipes": [
+    {
+      "id": "C-001",
+      "scope": "ui",
+      "problem": "Verificar que un enlace descarga un PDF con URL específica cuando tiene target='_blank'",
+      "code": "const downloadPromise = page.waitForEvent('download');\nconst link = await component.getLink();\nawait link.click();\nconst download = await downloadPromise;\nconst downloadUrl = download.url();\nexpect(downloadUrl).toContain('.pdf');\nexpect(downloadUrl).toBe('https://expected-url.com/file.pdf');",
+      "placement": "tests/spec",
+      "confirmations": 1,
+      "firstSeen": "2026-08-24T21:47:03.427Z",
+      "lastSeen": "2026-08-24T21:47:03.427Z",
+      "sessions": [
+        "CINE-81"
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "F-001",
+      "question": "¿Cuál es la URL de la página representativa que tiene footer para ejecutar tests del footer?",
+      "answer": "/mx",
+      "area": "footer-legales",
+      "source": "human",
+      "firstSeen": "2026-08-24T21:47:03.427Z",
+      "lastSeen": "2026-08-24T21:47:03.427Z",
+      "sessions": [
+        "CINE-81"
+      ]
+    },
+    {
+      "id": "F-002",
+      "question": "¿Cuál es la URL exacta del PDF de Términos y condiciones generales?",
+      "answer": "https://pimcore-content.cinepolis.com/assets/Legales/terminos-condiciones-cinepolis.pdf",
+      "area": "footer-legales",
+      "source": "human",
+      "firstSeen": "2026-08-24T21:47:03.427Z",
+      "lastSeen": "2026-08-24T21:47:03.427Z",
+      "sessions": [
+        "CINE-81"
+      ]
+    },
+    {
+      "id": "F-003",
+      "question": "¿Cuál es el texto exacto del enlace de Términos y condiciones en el footer?",
+      "answer": "Términos y condiciones",
+      "area": "footer-legales",
+      "source": "human",
+      "firstSeen": "2026-08-24T21:47:03.427Z",
+      "lastSeen": "2026-08-24T21:47:03.427Z",
+      "sessions": [
+        "CINE-81"
+      ]
+    },
+    {
+      "id": "F-004",
+      "question": "¿El enlace de Términos y condiciones descarga el PDF o abre una nueva pestaña?",
+      "answer": "Descarga el archivo PDF directamente, no genera una página nueva",
+      "area": "footer-legales",
+      "source": "human",
+      "firstSeen": "2026-08-24T21:47:03.427Z",
+      "lastSeen": "2026-08-24T21:47:03.427Z",
+      "sessions": [
+        "CINE-81"
+      ]
+    }
+  ],
+  "stats": {
+    "sessions": 1,
+    "specsGenerated": 3,
+    "specsPassedFirstTry": 0,
+    "totalRepairAttempts": 4,
+    "averageRepairAttempts": 1.33,
+    "questionsAvoidedByFacts": 0
+  },
+  "history": [
+    {
+      "sessionKey": "CINE-81",
+      "date": "2026-08-24T21:47:03.428Z",
+      "specsGenerated": 3,
+      "specsPassedFirstTry": 0,
+      "newRules": 3,
+      "newRecipes": 1,
+      "newFacts": 4,
+      "confirmedRules": 0,
+      "violatedRules": [],
+      "notes": "Hubo confusión inicial entre el texto del test case ('Términos y condiciones generales') y el texto real del enlace ('Términos y condiciones'). El humano tuvo que corregir 3 veces. Considerar validar textos exactos de UI antes de generar."
+    }
+  ]
 }

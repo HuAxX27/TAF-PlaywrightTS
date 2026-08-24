@@ -12,5 +12,4 @@ node_modules/
 # Auth Session
 .auth/
 # Agente AQA
-agent/artifacts/
 tests/**/*.invalid

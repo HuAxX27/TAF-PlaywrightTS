@@ -1,0 +1,30 @@
+[
+  {
+    "testCaseId": "CINE-81",
+    "kind": "ui",
+    "module": "footer-legales",
+    "startPath": "/",
+    "requiredEvidence": [
+      "Footer visible en viewport",
+      "Sección 'Legales' visible dentro del footer",
+      "Enlace 'Términos y condiciones generales' visible",
+      "Atributo target='_blank' presente en el enlace"
+    ],
+    "assertions": [
+      "Footer está visible en la página",
+      "Sección 'Legales' existe y es visible",
+      "Enlace 'Términos y condiciones generales' tiene atributo target='_blank'",
+      "Al hacer click se abre nueva pestaña",
+      "URL de la nueva pestaña termina en .pdf",
+      "URL de la nueva pestaña coincide con URL esperada"
+    ],
+    "filesToModify": [
+      "src/pages/FooterComponent.ts",
+      "tests/footer/terminos-condiciones-link.spec.ts"
+    ],
+    "risks": [
+      "PENDIENTE Q-01: URL de página representativa con footer no especificada",
+      "PENDIENTE Q-02: URL esperada del PDF de términos y condiciones no especificada"
+    ]
+  }
+]

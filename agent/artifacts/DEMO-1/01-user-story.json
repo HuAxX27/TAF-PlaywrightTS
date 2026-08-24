@@ -1,0 +1,19 @@
+{
+  "key": "DEMO-1",
+  "title": "Documentos legales accesibles desde el footer",
+  "description": "Como usuario del sitio de Cinepolis Mexico\nquiero consultar los documentos legales desde el footer de cualquier pagina\npara poder revisar terminos, condiciones y avisos antes de comprar.\n\nLa seccion \"Legales\" del footer agrupa los enlaces a documentos PDF alojados en\nel CDN de contenido. Cada enlace abre el documento en una pestana nueva.",
+  "acceptanceCriteria": [
+    "La seccion \"Legales\" del footer muestra el enlace de Terminos y condiciones generales apuntando al PDF correcto y con target _blank",
+    "El enlace de Terminos y condiciones Cineticket abre el PDF correspondiente en una pestana nueva y responde con HTTP 200",
+    "El enlace de Aviso de privacidad abre el PDF correspondiente en una pestana nueva",
+    "El enlace de Terminos Cinecash esta visible en el footer y abre su PDF en una pestana nueva",
+    "El enlace de Terminos y Condiciones Garantia Cinepolis abre su PDF y el content-type de la respuesta es application/pdf",
+    "El enlace de Formato de reclamo Garantia Cinepolis esta visible y descarga el formato correcto",
+    "La seccion Legales del footer es visible en viewport movil"
+  ],
+  "labels": [
+    "footer",
+    "legales",
+    "homePage"
+  ]
+}
