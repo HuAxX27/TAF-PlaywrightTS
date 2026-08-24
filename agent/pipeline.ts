@@ -25,11 +25,7 @@ import {
     type MultiAgentResult,
     type RepairTarget,
 } from "./framework/multiAgent";
-import {
-    closeSessionLearning,
-    migrateLegacyDatabase,
-    SessionRecorder,
-} from "./framework/learning";
+import { closeSessionLearning, migrateLegacyDatabase, SessionRecorder } from "./framework/learning";
 import {
     describeSessionLearning,
     factsForPrompt,
@@ -39,19 +35,20 @@ import {
 import { createProvider, extractJson, type LlmProvider } from "./llm";
 import {
     clarifyPrompt,
+    automationPlanPrompt,
     codegenPrompt,
     coveragePrompt,
     refinePrompt,
     repairPrompt,
     SYSTEM_PROMPT,
-    testCasesPrompt,
     type CodegenContext,
 } from "./prompts";
-import { createStorySource, createTestCaseSource } from "./sources";
+import { createTestCaseSource } from "./sources";
 import { renderCoverageMarkdown, renderReport, renderTestCasesMarkdown } from "./report";
 import type {
     AgentRunResult,
     AnsweredQuestion,
+    AutomationPlan,
     CoverageItem,
     ExistingTest,
     FinalValidationResult,
@@ -61,21 +58,16 @@ import type {
     OpenQuestion,
     TestCase,
     TestKind,
-    UserStory,
+    XrayRunContext,
     E2EValidationResult,
 } from "./types";
 
 /** Recolector de la corrida en curso; se cierra y destila al final. */
 let recorder: SessionRecorder;
 
-/** "story": disena TCs desde una User Story. "testcase": el TC ya viene definido (p.ej. Xray). */
-export type RunMode = "story" | "testcase";
-
 export interface RunOptions {
-    storyKey: string;
+    selector: string;
     provider?: string;
-    source?: string;
-    mode?: RunMode;
     /** Analiza y reporta, pero no escribe ningun spec. */
     dryRun?: boolean;
     /** Tambien genera codigo para los test cases marcados como "partial". */
@@ -103,102 +95,51 @@ export async function runAgent(options: RunOptions): Promise<AgentRunResult> {
     }
 
     try {
-        return (options.mode ?? "story") === "testcase"
-            ? await runFromTestCases(options)
-            : await runFromStory(options);
+        return await runFromTestCases(options);
     } finally {
         // Sin esto el proceso queda colgado esperando en stdin.
         closeHumanChannel();
     }
 }
 
-async function runFromStory(options: RunOptions): Promise<AgentRunResult> {
-    const provider = createProvider(options.provider);
-    const source = createStorySource(options.source);
-    const artifactsDir = path.join(agentConfig.artifactsDir, options.storyKey);
-
-    fs.mkdirSync(artifactsDir, { recursive: true });
-    recorder = new SessionRecorder(options.storyKey, provider);
-
-    console.log(`\nAgente AQA  |  historia: ${options.storyKey}`);
-    console.log(`   proveedor: ${provider.name} (${provider.model})   origen: ${source.name}`);
-    console.log(`   modo: ${describeMode()}\n`);
-
-    // --- 1. User Story -------------------------------------------------------
-    console.log("1/9  Leyendo la User Story...");
-    const story = await source.fetch(options.storyKey);
-    writeJson(path.join(artifactsDir, "01-user-story.json"), story);
-    console.log(
-        `     "${story.title}" - ${story.acceptanceCriteria.length} criterios de aceptacion`
-    );
-
-    if (story.acceptanceCriteria.length === 0) {
-        console.warn(
-            "     ! No se detectaron criterios de aceptacion; los test cases seran mas debiles."
-        );
-    }
-
-    // --- 2. Test Cases -------------------------------------------------------
-    console.log("2/9  Disenando test cases a partir de la historia...");
-    let testCases = await generateTestCases(provider, story);
-    writeArtifacts(artifactsDir, story, testCases);
-    console.log(`     ${testCases.length} test cases propuestos`);
-
-    // --- 3. Revision y aprobacion humana ------------------------------------
-    console.log("3/9  Revision humana de los test cases...");
-    const humanReview: HumanReviewRound[] = [];
-    testCases = await reviewTestCasesWithHuman(
-        provider,
-        story,
-        testCases,
-        humanReview,
-        artifactsDir
-    );
-
-    return finishRun({
-        provider,
-        story,
-        testCases,
-        artifactsDir,
-        options,
-        humanReview,
-        firstStepNumber: 4,
-        totalSteps: 9,
-    });
-}
-
-/** TC ya definido (p.ej. en Xray) -> spec directo, sin redisenar nada con el LLM. */
+/** Test Cases de Xray -> candidates. */
 async function runFromTestCases(options: RunOptions): Promise<AgentRunResult> {
     const provider = createProvider(options.provider);
-    const source = createTestCaseSource(options.source);
-    const artifactsDir = path.join(agentConfig.artifactsDir, options.storyKey);
+    const source = createTestCaseSource();
+    const artifactsDir = path.join(agentConfig.artifactsDir, runDirectoryName(options.selector));
 
     fs.mkdirSync(artifactsDir, { recursive: true });
-    recorder = new SessionRecorder(options.storyKey, provider);
+    writeJson(path.join(artifactsDir, "00-run.json"), {
+        selector: options.selector,
+        startedAt: new Date().toISOString(),
+        provider: provider.name,
+        model: provider.model,
+        candidatesDir: path
+            .relative(agentConfig.root, agentConfig.candidatesDir)
+            .replace(/\\/g, "/"),
+    });
+    recorder = new SessionRecorder(options.selector, provider);
 
-    console.log(`\nAgente AQA  |  test case: ${options.storyKey}`);
+    console.log(`\nAgente AQA  |  selector Xray: ${options.selector}`);
     console.log(`   proveedor: ${provider.name} (${provider.model})   origen: ${source.name}`);
     console.log(`   modo: ${describeMode()}\n`);
 
     // --- 1. Test cases ya definidos ------------------------------------------
-    console.log("1/8  Leyendo el/los test case(s) definidos...");
-    let testCases = await source.fetch(options.storyKey);
-    const story: UserStory = {
-        key: options.storyKey,
-        title: testCases.length === 1 ? testCases[0].title : options.storyKey,
-        description: "",
-        acceptanceCriteria: [],
-        labels: [],
+    console.log("1/8  Leyendo Test Case(s) desde Xray...");
+    let testCases = await source.fetch(options.selector);
+    const xray: XrayRunContext = {
+        selector: options.selector,
+        label: testCases.length === 1 ? testCases[0].title : `Lote Xray: ${options.selector}`,
     };
-    writeArtifacts(artifactsDir, story, testCases);
+    writeArtifacts(artifactsDir, xray, testCases);
     console.log(`     ${testCases.length} test case(s) importados de ${source.name}`);
 
     // --- 2. Revision humana: un TC importado casi siempre trae huecos --------
-    console.log("2/8  Revision humana del test case importado...");
+    console.log("2/8  Revision de los Test Cases importados...");
     const humanReview: HumanReviewRound[] = [];
     testCases = await reviewTestCasesWithHuman(
         provider,
-        story,
+        xray,
         testCases,
         humanReview,
         artifactsDir
@@ -206,7 +147,7 @@ async function runFromTestCases(options: RunOptions): Promise<AgentRunResult> {
 
     return finishRun({
         provider,
-        story,
+        xray,
         testCases,
         artifactsDir,
         options,
@@ -225,7 +166,7 @@ function describeMode(): string {
 
 interface FinishRunArgs {
     provider: LlmProvider;
-    story: UserStory;
+    xray: XrayRunContext;
     testCases: TestCase[];
     artifactsDir: string;
     options: RunOptions;
@@ -239,7 +180,7 @@ interface FinishRunArgs {
  * generacion de codigo y validacion final contra el test case original.
  */
 async function finishRun(args: FinishRunArgs): Promise<AgentRunResult> {
-    const { provider, story, testCases, artifactsDir, options, humanReview, totalSteps } = args;
+    const { provider, xray, testCases, artifactsDir, options, humanReview, totalSteps } = args;
     let step = args.firstStepNumber;
     const label = () => `${step++}/${totalSteps}`;
 
@@ -250,7 +191,7 @@ async function finishRun(args: FinishRunArgs): Promise<AgentRunResult> {
         testCase.kind = kindOf(kindDecisions, testCase.id);
     }
     writeJson(path.join(artifactsDir, "02b-kind-decisions.json"), kindDecisions);
-    writeArtifacts(artifactsDir, story, testCases);
+    writeArtifacts(artifactsDir, xray, testCases);
 
     const uiCount = kindDecisions.filter((decision) => decision.kind === "ui").length;
     console.log(`     UI: ${uiCount}  |  API: ${kindDecisions.length - uiCount}`);
@@ -295,7 +236,13 @@ async function finishRun(args: FinishRunArgs): Promise<AgentRunResult> {
         );
     } else {
         console.log(`${label()}  Generando ${pending.length} specs...`);
-        generated = await generateSpecs(provider, pending, collectAnswers(humanReview), humanReview);
+        generated = await generateSpecs(
+            provider,
+            pending,
+            collectAnswers(humanReview),
+            humanReview,
+            artifactsDir
+        );
 
         // --- Validacion final: TC original vs codigo generado -----------------
         console.log(`${label()}  Validando el codigo generado contra el test case original...`);
@@ -323,12 +270,30 @@ async function finishRun(args: FinishRunArgs): Promise<AgentRunResult> {
     console.log(`${label()}  Registrando lo aprendido en esta sesion...`);
     recorder.recordHumanReview(humanReview);
     const learning = await closeSessionLearning(provider, recorder);
-    for (const line of describeSessionLearning(learning)) {
-        console.log(`     ${line}`);
+    if (learning) {
+        for (const line of describeSessionLearning(learning)) {
+            console.log(`     ${line}`);
+        }
     }
 
+    writeJson(
+        path.join(artifactsDir, "08-candidate-manifest.json"),
+        generated.map((spec) => ({
+            testCaseId: spec.testCaseId,
+            kind: spec.kind,
+            candidate: spec.filePath,
+            status: !spec.validation.ok
+                ? "needs_repair"
+                : spec.finalValidation?.fullyCovered
+                  ? "ready_for_review"
+                  : "coverage_incomplete",
+            supportFiles: spec.supportFiles,
+            e2ePassed: spec.validation.e2eValidation?.passed ?? null,
+        }))
+    );
+
     const result: AgentRunResult = {
-        story,
+        xray,
         testCases,
         inventory,
         coverage,
@@ -361,7 +326,7 @@ async function finishRun(args: FinishRunArgs): Promise<AgentRunResult> {
  */
 async function reviewTestCasesWithHuman(
     provider: LlmProvider,
-    story: UserStory,
+    xray: XrayRunContext,
     initial: TestCase[],
     humanReview: HumanReviewRound[],
     artifactsDir: string
@@ -370,7 +335,7 @@ async function reviewTestCasesWithHuman(
     const alreadyAsked = new Set<string>();
 
     for (let round = 1; round <= agentConfig.maxReviewRounds; round++) {
-        const detected = (await detectOpenQuestions(provider, story, testCases)).filter(
+        const detected = (await detectOpenQuestions(provider, xray, testCases)).filter(
             (question) => !alreadyAsked.has(normalizeQuestion(question.question))
         );
         for (const question of detected) {
@@ -405,16 +370,16 @@ async function reviewTestCasesWithHuman(
             // codigo necesita y que el humano acaba de aportar.
             if (hasNewInput) {
                 console.log("     aplicando tus respuestas a los test cases...");
-                testCases = await refineTestCases(provider, story, testCases, answers, undefined);
-                writeArtifacts(artifactsDir, story, testCases);
+                testCases = await refineTestCases(provider, xray, testCases, answers, undefined);
+                writeArtifacts(artifactsDir, xray, testCases);
             }
             console.log("     test cases aprobados.");
             return testCases;
         }
 
         console.log(`     aplicando los cambios pedidos (ronda ${round})...`);
-        testCases = await refineTestCases(provider, story, testCases, answers, decision.feedback);
-        writeArtifacts(artifactsDir, story, testCases);
+        testCases = await refineTestCases(provider, xray, testCases, answers, decision.feedback);
+        writeArtifacts(artifactsDir, xray, testCases);
     }
 
     console.warn(
@@ -423,11 +388,11 @@ async function reviewTestCasesWithHuman(
     return testCases;
 }
 
-function writeArtifacts(artifactsDir: string, story: UserStory, testCases: TestCase[]): void {
+function writeArtifacts(artifactsDir: string, xray: XrayRunContext, testCases: TestCase[]): void {
     writeJson(path.join(artifactsDir, "02-test-cases.json"), testCases);
     fs.writeFileSync(
         path.join(artifactsDir, "02-test-cases.md"),
-        renderTestCasesMarkdown(story, testCases),
+        renderTestCasesMarkdown(xray, testCases),
         "utf-8"
     );
 }
@@ -443,13 +408,13 @@ function printTestCasesSummary(testCases: TestCase[]): void {
 
 async function detectOpenQuestions(
     provider: LlmProvider,
-    story: UserStory,
+    xray: XrayRunContext,
     testCases: TestCase[]
 ): Promise<OpenQuestion[]> {
     try {
         const raw = await provider.complete({
             system: SYSTEM_PROMPT,
-            prompt: clarifyPrompt(story, testCases),
+            prompt: clarifyPrompt(xray, testCases),
         });
         const parsed = extractJson<Array<Partial<OpenQuestion>>>(raw);
 
@@ -476,7 +441,7 @@ async function detectOpenQuestions(
 
 async function refineTestCases(
     provider: LlmProvider,
-    story: UserStory,
+    xray: XrayRunContext,
     testCases: TestCase[],
     answers: AnsweredQuestion[],
     feedback: string | undefined
@@ -484,7 +449,7 @@ async function refineTestCases(
     try {
         const raw = await provider.complete({
             system: SYSTEM_PROMPT,
-            prompt: refinePrompt(story, testCases, answers, feedback),
+            prompt: refinePrompt(xray, testCases, answers, feedback),
         });
         const refined = normalizeTestCases(extractJson<Partial<TestCase>[]>(raw));
         return refined.length > 0 ? refined : testCases;
@@ -497,7 +462,10 @@ async function refineTestCases(
 }
 
 function normalizeQuestion(question: string): string {
-    return question.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    return question
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
 }
 
 /**
@@ -539,10 +507,7 @@ function collectAnswers(humanReview: HumanReviewRound[]): AnsweredQuestion[] {
 // ---------------------------------------------------------------------------
 
 /** Clasifica y deja que el humano corrija los casos donde el agente duda. */
-async function resolveKinds(
-    provider: LlmProvider,
-    testCases: TestCase[]
-): Promise<KindDecision[]> {
+async function resolveKinds(provider: LlmProvider, testCases: TestCase[]): Promise<KindDecision[]> {
     const decisions = await classifyTestCases(provider, testCases);
     const byId = new Map(testCases.map((testCase) => [testCase.id, testCase]));
 
@@ -571,15 +536,6 @@ async function resolveKinds(
 
 function kindOf(decisions: KindDecision[], testCaseId: string): TestKind {
     return decisions.find((decision) => decision.testCaseId === testCaseId)?.kind ?? "ui";
-}
-
-async function generateTestCases(provider: LlmProvider, story: UserStory): Promise<TestCase[]> {
-    const raw = await provider.complete({
-        system: SYSTEM_PROMPT,
-        prompt: testCasesPrompt(story),
-    });
-
-    return normalizeTestCases(extractJson<Partial<TestCase>[]>(raw));
 }
 
 function normalizeTestCases(items: Partial<TestCase>[]): TestCase[] {
@@ -650,24 +606,88 @@ function selectPending(
     });
 }
 
+/**
+ * Planeacion separada: si el modelo falla al planear, el fallback es explicito
+ * y conservador. El codegen recibe este contrato en vez de reinterpretar el TC.
+ */
+async function createAutomationPlan(
+    provider: LlmProvider,
+    testCase: TestCase,
+    kind: TestKind
+): Promise<AutomationPlan> {
+    const fallback: AutomationPlan = {
+        testCaseId: testCase.id,
+        kind,
+        module: moduleForTestCase(testCase),
+        startPath: "/",
+        requiredEvidence: testCase.steps.filter(Boolean),
+        assertions: testCase.expectedResult ? [testCase.expectedResult] : [],
+        filesToModify: ["spec"],
+        risks: ["Plan de respaldo: revisar evidencia de UI antes de promover el candidate."],
+    };
+
+    try {
+        const raw = await provider.complete({
+            system: SYSTEM_PROMPT,
+            prompt: automationPlanPrompt(testCase, kind),
+        });
+        const parsed = extractJson<Partial<AutomationPlan>>(raw);
+        return {
+            ...fallback,
+            testCaseId: testCase.id,
+            kind,
+            module: slugifyModule(parsed.module ?? fallback.module),
+            startPath: safeStartPath(parsed.startPath),
+            requiredEvidence: cleanList(parsed.requiredEvidence, fallback.requiredEvidence),
+            assertions: cleanList(parsed.assertions, fallback.assertions),
+            filesToModify: cleanList(parsed.filesToModify, fallback.filesToModify),
+            risks: cleanList(parsed.risks, fallback.risks),
+        };
+    } catch (error) {
+        console.warn(
+            `       ! no se pudo planear ${testCase.id}; se usa un plan conservador (${error instanceof Error ? error.message : String(error)})`
+        );
+        return fallback;
+    }
+}
+
+function cleanList(value: unknown, fallback: string[]): string[] {
+    if (!Array.isArray(value)) return fallback;
+    const items = value
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+        .slice(0, 20);
+    return items.length > 0 ? items : fallback;
+}
+
+/** El plan puede elegir rutas relativas del sitio, nunca URLs externas ni javascript:. */
+function safeStartPath(value: unknown): string {
+    const pathValue = typeof value === "string" ? value.trim() : "/";
+    return pathValue.startsWith("/") && !pathValue.startsWith("//") ? pathValue : "/";
+}
+
 async function generateSpecs(
     provider: LlmProvider,
     pending: TestCase[],
     humanAnswers: AnsweredQuestion[],
-    humanReview: HumanReviewRound[]
+    humanReview: HumanReviewRound[],
+    artifactsDir: string
 ): Promise<GeneratedSpec[]> {
     // El contexto se arma una vez por tipo: son dos vistas distintas del framework.
     const frameworkContextByKind = new Map<TestKind, string>();
     const results: GeneratedSpec[] = [];
+    const plans: AutomationPlan[] = [];
 
     for (const testCase of pending) {
         const kind: TestKind = testCase.kind ?? "ui";
+        const automationPlan = await createAutomationPlan(provider, testCase, kind);
+        plans.push(automationPlan);
         if (!frameworkContextByKind.has(kind)) {
             frameworkContextByKind.set(kind, buildFrameworkContext(kind));
         }
 
         // tests/ui/<modulo>/ y tests/api/<modulo>/ separan los dos mundos.
-        const moduleDir = path.join(agentConfig.testsDir, kind, moduleForTestCase(testCase));
+        const moduleDir = path.join(agentConfig.candidatesDir, kind, automationPlan.module);
         fs.mkdirSync(moduleDir, { recursive: true });
 
         const filePath = path.join(moduleDir, specFileName(testCase));
@@ -682,27 +702,37 @@ async function generateSpecs(
             specRelPath,
             kind,
             kindConventions: loadKindConventions(kind),
+            automationPlan,
             humanAnswers,
             domainFacts: factsForPrompt(factAreasFor(testCase)),
-            ...(await explorationContext(kind, testCase)),
+            ...(await explorationContext(kind, testCase, automationPlan.startPath)),
         };
 
         results.push(
-            await generateWithHumanApproval(provider, testCase, kind, filePath, context, humanReview)
+            await generateWithHumanApproval(
+                provider,
+                testCase,
+                kind,
+                filePath,
+                context,
+                humanReview
+            )
         );
     }
 
+    writeJson(path.join(artifactsDir, "05-automation-plans.json"), plans);
     return results;
 }
 
 /** La exploracion en vivo solo aporta a los tests de UI: un test de API no tiene pagina. */
 async function explorationContext(
     kind: TestKind,
-    testCase: TestCase
+    testCase: TestCase,
+    startPath: string
 ): Promise<Pick<CodegenContext, "pageExploration" | "explorationWarning">> {
     if (kind === "api") return {};
 
-    const exploration = await explorePage("/", explorationTriggersFor(testCase));
+    const exploration = await explorePage(startPath, explorationTriggersFor(testCase));
     if (exploration.warning) {
         console.log(`       ! exploracion en vivo fallo: ${exploration.warning}`);
         return { explorationWarning: exploration.warning };
@@ -785,7 +815,10 @@ async function generateOneSpec(
     };
 
     let bundle = parseFileBundle(
-        await provider.complete({ system: SYSTEM_PROMPT, prompt: codegenPrompt(testCase, context) }),
+        await provider.complete({
+            system: SYSTEM_PROMPT,
+            prompt: codegenPrompt(testCase, context),
+        }),
         context.specRelPath
     );
     bundle.supportFiles.forEach((file) => trackOriginal(file.path));
@@ -836,7 +869,13 @@ async function generateOneSpec(
         }
         annotateForManualReview(filePath, undefined, validation.errors);
         console.log("       no paso la validacion estatica; spec anotado para revision manual");
-        recorder.recordRepair(testCase.id, kind, repairErrors, codeBeforeRepairs, bundle.specContent);
+        recorder.recordRepair(
+            testCase.id,
+            kind,
+            repairErrors,
+            codeBeforeRepairs,
+            bundle.specContent
+        );
     } else {
         console.log(
             `       OK: compila y Playwright lo reconoce (${bundle.supportFiles.length} archivo(s) de soporte)`
@@ -844,7 +883,13 @@ async function generateOneSpec(
         if (repairErrors.length > 0) {
             // El diff entre el primer intento y el que si compilo es la senal que
             // permite deducir la regla que habria evitado el error desde el inicio.
-            recorder.recordRepair(testCase.id, kind, repairErrors, codeBeforeRepairs, bundle.specContent);
+            recorder.recordRepair(
+                testCase.id,
+                kind,
+                repairErrors,
+                codeBeforeRepairs,
+                bundle.specContent
+            );
         }
 
         // Validación E2E: ejecutar el test contra la app real (SIEMPRE)
@@ -1024,17 +1069,13 @@ function explorationTriggersFor(testCase: TestCase): RegExp[] {
     const text = [testCase.title, ...testCase.steps, testCase.expectedResult].join(" ");
     if (!LOGIN_KEYWORDS.test(text)) return [];
 
-    return [
-        /iniciar sesi[oó]n/i,
-        /ingresar/i,
-        /acceder/i,
-        /mi cuenta/i,
-        /login/i,
-        /entrar/i,
-    ];
+    return [/iniciar sesi[oó]n/i, /ingresar/i, /acceder/i, /mi cuenta/i, /login/i, /entrar/i];
 }
 
-function writeBundle(specFilePath: string, bundle: { specContent: string; supportFiles: FileEntry[] }): void {
+function writeBundle(
+    specFilePath: string,
+    bundle: { specContent: string; supportFiles: FileEntry[] }
+): void {
     fs.writeFileSync(specFilePath, withGeneratedMarker(bundle.specContent), "utf-8");
 
     for (const file of bundle.supportFiles) {
@@ -1084,8 +1125,8 @@ const TITLE_MODULE_PREFIX = /^\s*\[([^[\]]+)\]/;
 
 /**
  * Decide en que subcarpeta de tests/<kind>/ cae el spec. Prioridad:
- * 1. Prefijo "[modulo]" en el titulo del TC (convencion de Xray: "[footer] ...").
- * 2. El primer tag de dominio (@footer, @home, @legales...).
+ * 1. Prefijo "[modulo]" en el titulo del TC.
+ * 2. El primer tag de dominio.
  * 3. "generated" como ultimo recurso.
  */
 function moduleForTestCase(testCase: TestCase): string {
@@ -1098,13 +1139,6 @@ function moduleForTestCase(testCase: TestCase): string {
         .find((tag) => tag.length > 0 && !TAG_TO_MODULE_EXCLUDE.has(tag));
 
     if (domainTag) return slugifyModule(domainTag);
-
-    // Si no hay tag de dominio, intentar inferir del título
-    const titleLower = testCase.title.toLowerCase();
-    if (titleLower.includes("footer") || titleLower.includes("legales")) return "footer";
-    if (titleLower.includes("home") || titleLower.includes("inicio")) return "home";
-    if (titleLower.includes("login") || titleLower.includes("auth")) return "login";
-    if (titleLower.includes("checkout") || titleLower.includes("carrito")) return "checkout";
 
     return "generated";
 }
@@ -1130,20 +1164,63 @@ function slugifyModule(value: string): string {
     );
 }
 
+/** Carpetas de artefactos validas tambien para JQLs con espacios, comillas o ':'. */
+function runDirectoryName(selector: string): string {
+    const slug = selector
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 48);
+    const hash = Array.from(selector).reduce(
+        (value, char) => (value * 31 + char.charCodeAt(0)) >>> 0,
+        0
+    );
+    return `${slug || "xray-batch"}-${hash.toString(36)}`;
+}
+
 /** Marca el archivo como generado por el agente: sirve para no imitarlo como ejemplo (ver context.ts). */
 function withGeneratedMarker(code: string): string {
-    const MARKER = "// Generado por el Agente AQA - revisar antes de aprobar.";
+    const MARKER =
+        "// Candidate generado por el Agente AQA - no ejecutar en regresion hasta promoverlo.";
     return code.trimStart().startsWith(MARKER) ? `${code}\n` : `${MARKER}\n${code}\n`;
 }
 
 function specFileName(testCase: TestCase): string {
-    const slug = testCase.title
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/\p{Diacritic}/gu, "")
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 60);
+    const ignored = new Set([
+        "la",
+        "el",
+        "los",
+        "las",
+        "de",
+        "del",
+        "para",
+        "que",
+        "y",
+        "en",
+        "un",
+        "una",
+        "con",
+        "al",
+        "se",
+        "esta",
+        "este",
+        "debe",
+        "ser",
+        "su",
+    ]);
+    const slug =
+        testCase.title
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/\p{Diacritic}/gu, "")
+            .split(/[^a-z0-9]+/)
+            .filter(
+                (word) =>
+                    word.length > 2 && !ignored.has(word) && word !== testCase.id.toLowerCase()
+            )
+            .slice(0, 5)
+            .join("-")
+            .slice(0, 40) || "scenario";
 
     return `${testCase.id.toLowerCase()}-${slug}.spec.ts`;
 }
@@ -1291,7 +1368,10 @@ function isRepairableTarget(relPath: string, specPath: string): boolean {
 function snapshotFiles(absPaths: string[]): Map<string, string | undefined> {
     const snapshot = new Map<string, string | undefined>();
     for (const absPath of absPaths) {
-        snapshot.set(absPath, fs.existsSync(absPath) ? fs.readFileSync(absPath, "utf-8") : undefined);
+        snapshot.set(
+            absPath,
+            fs.existsSync(absPath) ? fs.readFileSync(absPath, "utf-8") : undefined
+        );
     }
     return snapshot;
 }

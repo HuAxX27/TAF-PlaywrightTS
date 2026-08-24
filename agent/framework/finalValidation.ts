@@ -76,7 +76,12 @@ function normalize(
             ? Math.round(
                   (scenarios.reduce(
                       (sum, scenario) =>
-                          sum + (scenario.status === "covered" ? 1 : scenario.status === "partial" ? 0.5 : 0),
+                          sum +
+                          (scenario.status === "covered"
+                              ? 1
+                              : scenario.status === "partial"
+                                ? 0.5
+                                : 0),
                       0
                   ) /
                       scenarios.length) *
@@ -90,7 +95,9 @@ function normalize(
         coveragePercent,
         scenarios,
         missingScenarios: allMissing,
-        extraBehaviors: (parsed.extraBehaviors ?? []).map((item) => String(item).trim()).filter(Boolean),
+        extraBehaviors: (parsed.extraBehaviors ?? [])
+            .map((item) => String(item).trim())
+            .filter(Boolean),
         verdict: parsed.verdict?.trim() || "El modelo no emitio veredicto.",
     };
 }
@@ -149,7 +156,9 @@ export function renderFinalValidationMarkdown(
     return [
         "# Validacion final: test case original vs codigo generado",
         "",
-        ...(sections.length > 0 ? sections : ["_No se ejecuto la validacion final en esta corrida._"]),
+        ...(sections.length > 0
+            ? sections
+            : ["_No se ejecuto la validacion final en esta corrida._"]),
         "",
     ].join("\n\n");
 }

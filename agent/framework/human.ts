@@ -103,9 +103,7 @@ export async function askOpenQuestions(questions: OpenQuestion[]): Promise<AskRe
 }
 
 export type ApprovalDecision =
-    | { action: "approve" }
-    | { action: "revise"; feedback: string }
-    | { action: "abort" };
+    { action: "approve" } | { action: "revise"; feedback: string } | { action: "abort" };
 
 /**
  * Puerta de aprobacion. El pipeline no avanza hasta que el humano dice que
@@ -123,9 +121,7 @@ export async function requestApproval(title: string, summary: string[]): Promise
     }
 
     for (;;) {
-        const raw = (
-            await prompt("\n  Aprobar? [s]i / [c]ambios / [a]bortar: ")
-        )
+        const raw = (await prompt("\n  Aprobar? [s]i / [c]ambios / [a]bortar: "))
             .trim()
             .toLowerCase();
 
@@ -136,9 +132,7 @@ export async function requestApproval(title: string, summary: string[]): Promise
             return { action: "abort" };
         }
         if (raw === "c" || raw === "cambios") {
-            const feedback = (
-                await prompt("  Describe que hay que cambiar (una linea): ")
-            ).trim();
+            const feedback = (await prompt("  Describe que hay que cambiar (una linea): ")).trim();
             if (feedback.length > 0) {
                 return { action: "revise", feedback };
             }

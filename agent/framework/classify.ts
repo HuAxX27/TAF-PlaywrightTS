@@ -37,7 +37,12 @@ function classifyByHeuristics(testCase: TestCase): HeuristicVerdict | null {
         };
     }
 
-    if (tags.includes("ui") || tags.includes("e2e") || testCase.level === "visual" || testCase.level === "a11y") {
+    if (
+        tags.includes("ui") ||
+        tags.includes("e2e") ||
+        testCase.level === "visual" ||
+        testCase.level === "a11y"
+    ) {
         return {
             kind: "ui",
             confidence: 90,
@@ -54,9 +59,12 @@ function classifyByHeuristics(testCase: TestCase): HeuristicVerdict | null {
         };
     }
 
-    const text = [testCase.title, ...testCase.preconditions, ...steps, testCase.expectedResult].join(
-        " "
-    );
+    const text = [
+        testCase.title,
+        ...testCase.preconditions,
+        ...steps,
+        testCase.expectedResult,
+    ].join(" ");
     const apiHits = countMatches(text, API_SIGNALS);
     const uiHits = countMatches(text, UI_SIGNALS);
 

@@ -27,7 +27,11 @@ interface XrayTestNode {
 }
 
 interface GetTestsResponse {
-    data?: { getTests?: { results?: XrayTestNode[] } };
+    data?: {
+        getTests?: { results?: XrayTestNode[] };
+        getTestPlan?: { tests?: { results?: XrayTestNode[] } };
+        getTestPlans?: { results?: Array<{ tests?: { results?: XrayTestNode[] } }> };
+    };
     errors?: Array<{ message?: string }>;
 }
 
@@ -42,8 +46,8 @@ const PRIORITY_MAP: Record<string, TestPriority> = {
 /**
  * Trae Test issues YA definidos en Xray Cloud (pasos manuales incluidos) via su
  * API GraphQL. Xray guarda los pasos fuera de los campos estandar de Jira, por
- * eso la API REST de Jira sola no basta (a diferencia de una User Story normal,
- * ver `jiraSource.ts`).
+ * eso la API REST de Jira sola no basta. Tambien admite lotes por JQL, claves
+ * explicitas o Test Plan.
  */
 export class XrayTestCaseSource implements TestCaseSource {
     readonly name = "xray";
@@ -71,18 +75,9 @@ export class XrayTestCaseSource implements TestCaseSource {
         });
     }
 
-    async fetch(key: string): Promise<TestCase[]> {
+    async fetch(selector: string): Promise<TestCase[]> {
         const token = await this.authenticate();
-        const query = `query {
-            getTests(jql: "key = ${escapeJql(key)}", limit: 10) {
-                results {
-                    issueId
-                    testType { name }
-                    steps { action data result }
-                    jira(fields: ["key", "summary", "priority", "labels"])
-                }
-            }
-        }`;
+        const query = queryFor(selector);
 
         const response = await fetch(`${this.options.baseUrl.replace(/\/+$/, "")}/api/v2/graphql`, {
             method: "POST",
@@ -96,20 +91,24 @@ export class XrayTestCaseSource implements TestCaseSource {
 
         if (!response.ok) {
             throw new Error(
-                `Xray respondio ${response.status} al pedir ${key}: ${(await response.text()).slice(0, 300)}`
+                `Xray respondio ${response.status} al pedir ${selector}: ${(await response.text()).slice(0, 300)}`
             );
         }
 
         const payload = (await response.json()) as GetTestsResponse;
         if (payload.errors?.length) {
             throw new Error(
-                `Xray devolvio errores para ${key}: ${payload.errors.map((error) => error.message).join("; ")}`
+                `Xray devolvio errores para ${selector}: ${payload.errors.map((error) => error.message).join("; ")}`
             );
         }
 
-        const results = payload.data?.getTests?.results ?? [];
+        const results =
+            payload.data?.getTests?.results ??
+            payload.data?.getTestPlan?.tests?.results ??
+            payload.data?.getTestPlans?.results?.flatMap((plan) => plan.tests?.results ?? []) ??
+            [];
         if (results.length === 0) {
-            throw new Error(`Xray no encontro ningun Test para "${key}".`);
+            throw new Error(`Xray no encontro ningun Test para "${selector}".`);
         }
 
         return results.map(toTestCase);
@@ -118,15 +117,18 @@ export class XrayTestCaseSource implements TestCaseSource {
     private async authenticate(): Promise<string> {
         if (this.token) return this.token;
 
-        const response = await fetch(`${this.options.baseUrl.replace(/\/+$/, "")}/api/v2/authenticate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                client_id: this.options.clientId,
-                client_secret: this.options.clientSecret,
-            }),
-            signal: AbortSignal.timeout(this.options.timeoutMs),
-        });
+        const response = await fetch(
+            `${this.options.baseUrl.replace(/\/+$/, "")}/api/v2/authenticate`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    client_id: this.options.clientId,
+                    client_secret: this.options.clientSecret,
+                }),
+                signal: AbortSignal.timeout(this.options.timeoutMs),
+            }
+        );
 
         if (!response.ok) {
             throw new Error(
@@ -139,6 +141,47 @@ export class XrayTestCaseSource implements TestCaseSource {
         this.token = raw.replace(/^"|"$/g, "");
         return this.token;
     }
+}
+
+function queryFor(selector: string): string {
+    const clean = selector.trim();
+    const fields = `issueId testType { name } steps { action data result }
+        jira(fields: ["key", "summary", "priority", "labels"])`;
+
+    if (clean.startsWith("plan:")) {
+        const planKey = clean.slice("plan:".length).trim();
+        if (!planKey) throw new Error("El selector plan: requiere una clave de Test Plan.");
+        // El CLI recibe la clave legible de Jira/Xray (p.ej. CINE-PLAN-7), no
+        // el issueId interno. getTestPlans permite resolverla con JQL oficial.
+        const jql = `key = "${escapeJql(planKey)}"`;
+        return `query { getTestPlans(jql: "${escapeGraphql(jql)}", limit: 1) {
+            results { tests(limit: 100) { results { ${fields} } } }
+        } }`;
+    }
+
+    let jql: string;
+    if (clean.startsWith("jql:")) {
+        jql = clean.slice("jql:".length).trim();
+    } else if (clean.startsWith("keys:")) {
+        const keys = clean
+            .slice("keys:".length)
+            .split(",")
+            .map((key) => key.trim())
+            .filter(Boolean);
+        if (keys.length === 0) throw new Error("El selector keys: requiere al menos una clave.");
+        jql = `key in (${keys.map((key) => `"${escapeJql(key)}"`).join(", ")})`;
+    } else {
+        jql = `key = "${escapeJql(clean)}"`;
+    }
+
+    if (!jql) throw new Error("La consulta JQL no puede estar vacia.");
+    return `query { getTests(jql: "${escapeGraphql(jql)}", limit: 100) {
+        results { ${fields} }
+    } }`;
+}
+
+function escapeGraphql(value: string): string {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, " ");
 }
 
 function toTestCase(node: XrayTestNode): TestCase {

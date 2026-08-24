@@ -28,7 +28,12 @@ export async function explorePage(
 ): Promise<PageExploration> {
     const baseURL = process.env.BASE_URL;
     if (!baseURL) {
-        return { url: startPath, title: "", ariaSnapshot: "", warning: "Falta BASE_URL en el .env." };
+        return {
+            url: startPath,
+            title: "",
+            ariaSnapshot: "",
+            warning: "Falta BASE_URL en el .env.",
+        };
     }
 
     const browser = await chromium.launch();

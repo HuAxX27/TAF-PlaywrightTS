@@ -6,7 +6,7 @@ import type { CodegenContext } from "../prompts";
 
 /**
  * Sistema multiagente para analizar y reparar tests fallidos.
- * 
+ *
  * Arquitectura:
  * - Agente Analizador: diagnostica el tipo de error y su causa raíz
  * - Agente Reparador: propone correcciones específicas al código
@@ -32,7 +32,12 @@ export interface RepairProposal {
 export interface MultiAgentResult {
     analysis: AnalysisResult;
     proposals: RepairProposal[];
-    validationNotes: string;
+    validation: RepairValidation;
+}
+
+export interface RepairValidation {
+    verdict: "approve" | "approve_with_reservations" | "reject";
+    notes: string;
 }
 
 /** Archivos editables durante la reparacion, con su ruta relativa exacta al repo. */
@@ -41,37 +46,28 @@ export interface RepairTarget {
     content: string;
 }
 
-/**
- * Fallos que el agente resuelve mal si no se le nombran explicitamente:
- * overlays promocionales, cookie banners y contenido lazy del footer.
- */
-const RECURRING_FAILURE_PLAYBOOK = `PATRONES DE FALLO CONOCIDOS EN ESTE SITIO (revisalos ANTES de tocar locators):
+/** Diagnostico generico: cada hipotesis debe sostenerse con evidencia de la corrida actual. */
+const UI_FAILURE_PLAYBOOK = `REGLAS DE DIAGNOSTICO PARA TESTS DE UI:
 
-1. POPUP / MODAL PROMOCIONAL AL CARGAR LA HOME
-   Sintoma: timeout en scrollIntoViewIfNeeded() o toBeVisible() aunque el locator sea correcto;
-   el screenshot muestra un modal grande tapando la pagina, o un boton "Cerrar" / "x" visible.
-   Causa: el overlay intercepta pointer events y bloquea el scroll del body.
-   Fix correcto: cerrar el overlay ANTES de interactuar, con un helper reutilizable e idempotente
-   en el Page Object / Component (no en el spec). El helper debe:
-     - buscar el boton de cierre por rol/nombre accesible (ej. getByRole("button", { name: /cerrar|close/i }))
-       y tambien un fallback por aria-label / [class*="close"];
-     - usar .first() y verificar isVisible() con timeout corto antes de hacer click;
-     - no fallar si el overlay no aparece (envolver en try/catch o condicionar con count()).
-   NUNCA "arregles" esto relajando el locator del elemento que si es correcto.
+1. USA EVIDENCIA DE LA CORRIDA ACTUAL
+   Contrasta el error, stack, screenshot, URL y snapshot de accesibilidad. No heredes supuestos
+   sobre modales, banners, carga diferida o estructura de pagina de otros tests.
 
-2. COOKIE BANNER / AVISO DE PRIVACIDAD FIJO AL PIE
-   Sintoma: el elemento del footer existe pero queda tapado; click intercepted.
-   Fix: aceptar/cerrar el banner en el mismo helper de overlays.
+2. LOCALIZADORES
+   Si el elemento aparece en el snapshot, compara rol, nombre accesible y estado real. Ajusta el
+   locator solo cuando la evidencia demuestre que no representa la UI. No uses CSS fragil.
 
-3. FOOTER CON CONTENIDO LAZY
-   Sintoma: el heading del footer no existe al inicio del test.
-   Fix: hacer scroll al final del documento y esperar el footer:
-   await page.locator("footer").scrollIntoViewIfNeeded() antes de resolver locators internos.
+3. NAVEGACION Y ESTADO
+   Verifica primero la URL, redirecciones, autenticacion y precondiciones. Un elemento ausente puede
+   indicar que el test esta en la pagina o estado equivocado.
 
-4. TEXTO CON exact: true DEMASIADO ESTRICTO
-   Sintoma: locator no encontrado con textos que en pantalla se ven iguales.
-   Fix: usar regex case-insensitive en getByRole({ name: /.../i }) en lugar de exact: true.
-   Solo aplica si el screenshot/snapshot confirma que el texto real difiere.`;
+4. ELEMENTOS QUE BLOQUEAN INTERACCIONES
+   Agrega manejo de overlays o banners unicamente si el screenshot o snapshot confirma que existen.
+   Implementalo como comportamiento reutilizable e idempotente fuera del spec.
+
+5. SINCRONIZACION
+   Usa auto-waiting y aserciones sobre estados observables. Prohibido waitForTimeout y aumentar
+   timeouts para ocultar una causa desconocida.`;
 
 /** Los fallos de un test de API son de otra naturaleza: nada de overlays ni locators. */
 const API_FAILURE_PLAYBOOK = `PATRONES DE FALLO CONOCIDOS EN TESTS DE API:
@@ -128,12 +124,16 @@ ${specContent}
 \`\`\`
 ${renderSupportBlock(supportFiles)}
 ERRORES DETECTADOS:
-${errors.map((e, i) => `
+${errors
+    .map(
+        (e, i) => `
 Error ${i + 1} (tipo: ${e.type}):
 ${e.message}
 ${e.stack ? `\nStack:\n${e.stack}` : ""}
 ${e.location ? `\nUbicación: ${e.location.file}:${e.location.line}:${e.location.column}` : ""}
-`).join("\n---\n")}
+`
+    )
+    .join("\n---\n")}
 
 SALIDA DEL TEST:
 \`\`\`
@@ -155,8 +155,7 @@ ${
 }
 INSTRUCCIONES:
 1. Compara el fallo contra los PATRONES DE FALLO CONOCIDOS antes de cualquier otra hipótesis.
-2. Identifica la causa raíz real (no el síntoma). Un timeout en el primer paso casi nunca es
-   culpa del locator: suele ser un overlay que bloquea la interacción.
+2. Identifica la causa raíz real (no el síntoma) y sustentala con evidencia de esta corrida.
 3. Si el snapshot de accesibilidad confirma que el texto del locator existe, la categoría NO es "locator".
 4. Clasifica el error y lista los componentes afectados con su ruta relativa real.
 5. Propón 2-3 correcciones específicas y accionables.
@@ -166,7 +165,7 @@ Responde SOLO con un JSON válido:
 {
   "rootCause": "descripción clara de la causa raíz",
   "errorCategory": "locator|timing|assertion|data|navigation|other",
-  "affectedComponents": ["src/pages/HomePage.ts"],
+  "affectedComponents": ["src/pages/DomainPage.ts"],
   "suggestedFixes": ["fix 1", "fix 2", "fix 3"],
   "confidence": 85
 }`;
@@ -246,7 +245,7 @@ INSTRUCCIONES:
 1. Aplica el fix que ataca la causa raíz. ${
         context.kind === "api"
             ? "Si el problema es un status inesperado, corrige el payload/headers o usa el metodo *Raw; no relajes la asercion del status."
-            : "Si es un overlay/popup, agrega el helper de cierre al Page Object o Component correspondiente e invócalo al inicio del test; no relajes locators correctos."
+            : "Corrige un Page Object, Component o flujo solo cuando la evidencia de la corrida confirme la causa; no inventes comportamiento del sitio."
     }
 2. Devuelve el contenido COMPLETO de cada archivo modificado (el archivo se sobrescribe entero).
 3. El spec importa test y expect desde "${context.importPath}", nunca desde "@playwright/test".
@@ -308,9 +307,7 @@ function renderSupportBlock(supportFiles: RepairTarget[]): string {
     if (supportFiles.length === 0) return "\n";
 
     const blocks = supportFiles
-        .map(
-            (file) => `FILE: ${file.relPath}\n\`\`\`typescript\n${file.content}\n\`\`\``
-        )
+        .map((file) => `FILE: ${file.relPath}\n\`\`\`typescript\n${file.content}\n\`\`\``)
         .join("\n\n");
 
     return `\nARCHIVOS DE SOPORTE QUE USA EL TEST (rutas relativas exactas):\n${blocks}\n`;
@@ -324,9 +321,9 @@ export async function validateRepairs(
     proposals: RepairProposal[],
     analysis: AnalysisResult,
     context: CodegenContext
-): Promise<string> {
+): Promise<RepairValidation> {
     if (proposals.length === 0) {
-        return "No hay propuestas para validar";
+        return { verdict: "reject", notes: "No hay propuestas para validar." };
     }
 
     const prompt = `TAREA: validar-reparaciones
@@ -338,7 +335,9 @@ ANÁLISIS ORIGINAL:
 - Categoría: ${analysis.errorCategory}
 
 PROPUESTAS DE REPARACIÓN:
-${proposals.map((p, i) => `
+${proposals
+    .map(
+        (p, i) => `
 Propuesta ${i + 1} (confianza: ${p.confidence}%):
 Archivo: ${p.filePath}
 Cambios: ${p.explanation}
@@ -348,7 +347,9 @@ Código reparado (primeras 20 líneas):
 ${p.repairedCode.split("\n").slice(0, 20).join("\n")}
 ...
 \`\`\`
-`).join("\n---\n")}
+`
+    )
+    .join("\n---\n")}
 
 CONTEXTO DEL FRAMEWORK:
 ${context.frameworkContext}
@@ -359,14 +360,29 @@ INSTRUCCIONES:
 3. Identifica posibles problemas o efectos secundarios
 4. Da un veredicto: APROBAR, APROBAR_CON_RESERVAS, o RECHAZAR
 
-Responde con un texto breve (máximo 200 palabras) con tu evaluación.`;
+Responde SOLO JSON valido:
+{
+  "verdict": "approve|approve_with_reservations|reject",
+  "notes": "evaluacion breve y concreta"
+}`;
 
     const response = await provider.complete({
         system: "Eres un revisor de código experto en Playwright.",
         prompt,
     });
 
-    return response.trim();
+    try {
+        const parsed = extractJson(response);
+        const verdict =
+            parsed.verdict === "approve" ||
+            parsed.verdict === "approve_with_reservations" ||
+            parsed.verdict === "reject"
+                ? parsed.verdict
+                : "reject";
+        return { verdict, notes: String(parsed.notes ?? "El revisor no aporto detalles.").trim() };
+    } catch {
+        return { verdict: "reject", notes: "El revisor no devolvio JSON valido." };
+    }
 }
 
 /**
@@ -407,18 +423,22 @@ export async function runMultiAgentRepair(
 
     console.log(`       ${proposals.length} propuesta(s) generada(s)`);
 
-    const validationNotes = await validateRepairs(provider, proposals, analysis, context);
+    const validation = await validateRepairs(provider, proposals, analysis, context);
+    console.log(
+        `       [Agente Validador] ${validation.verdict}: ${truncate(validation.notes, 160)}`
+    );
 
     return {
         analysis,
-        proposals,
-        validationNotes,
+        // Una reparacion rechazada nunca se aplica solo porque compila.
+        proposals: validation.verdict === "reject" ? [] : proposals,
+        validation,
     };
 }
 
 /** Los modos de fallo de un test de API no tienen nada que ver con los de UI. */
 function playbookFor(kind: CodegenContext["kind"]): string {
-    return kind === "api" ? API_FAILURE_PLAYBOOK : RECURRING_FAILURE_PLAYBOOK;
+    return kind === "api" ? API_FAILURE_PLAYBOOK : UI_FAILURE_PLAYBOOK;
 }
 
 function truncate(text: string, max: number): string {

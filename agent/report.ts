@@ -4,7 +4,7 @@ import type {
     CoverageItem,
     CoverageStatus,
     TestCase,
-    UserStory,
+    XrayRunContext,
 } from "./types";
 
 const STATUS_LABEL: Record<CoverageStatus, string> = {
@@ -14,20 +14,14 @@ const STATUS_LABEL: Record<CoverageStatus, string> = {
 };
 
 /** Los test cases en markdown, para revision humana o para subirlos a Jira/Xray/Zephyr. */
-export function renderTestCasesMarkdown(story: UserStory, testCases: TestCase[]): string {
+export function renderTestCasesMarkdown(xray: XrayRunContext, testCases: TestCase[]): string {
     const header = [
-        `# Test Cases - ${story.key}`,
+        `# Test Cases importados de Xray - ${xray.selector}`,
         "",
-        `**Historia:** ${story.title}`,
-        story.url ? `**Jira:** ${story.url}` : "",
+        `**Lote:** ${xray.label}`,
+        xray.url ? `**Referencia:** ${xray.url}` : "",
         "",
-        "## Criterios de aceptacion analizados",
-        "",
-        ...(story.acceptanceCriteria.length > 0
-            ? story.acceptanceCriteria.map((criterion, index) => `${index + 1}. ${criterion}`)
-            : ["_La historia no declara criterios de aceptacion explicitos._"]),
-        "",
-        "## Test cases propuestos",
+        "## Test Cases recibidos",
         "",
     ];
 
@@ -85,7 +79,7 @@ export function renderReport(result: AgentRunResult, provider: LlmProvider): str
 
     const ok = result.generated.filter((spec) => spec.validation.ok);
     const failed = result.generated.filter((spec) => !spec.validation.ok);
-    
+
     // Estadísticas de validación E2E
     const e2eExecuted = result.generated.filter((spec) => spec.validation.e2eValidation?.executed);
     const e2ePassed = e2eExecuted.filter((spec) => spec.validation.e2eValidation?.passed);
@@ -99,15 +93,15 @@ export function renderReport(result: AgentRunResult, provider: LlmProvider): str
         .filter((question) => question.answeredByHuman);
 
     return [
-        `# Reporte del agente AQA - ${result.story.key}`,
+        `# Reporte del agente AQA - ${result.xray.selector}`,
         "",
-        `- **Historia:** ${result.story.title}`,
+        `- **Lote Xray:** ${result.xray.label}`,
         `- **Proveedor de IA:** ${provider.name} (${provider.model})`,
         `- **Fecha:** ${new Date().toISOString()}`,
         "",
         "## Resumen",
         "",
-        `- Test cases disenados: **${result.testCases.length}**`,
+        `- Test Cases importados: **${result.testCases.length}**`,
         `- Clasificacion: **${result.kindDecisions.filter((item) => item.kind === "ui").length}** UI, **${result.kindDecisions.filter((item) => item.kind === "api").length}** API`,
         `- Pruebas ya existentes en el framework: **${result.inventory.length}**`,
         `- Cobertura: **${count("covered")}** cubiertos, **${count("partial")}** parciales, **${count("missing")}** faltantes`,
@@ -215,7 +209,12 @@ function renderHumanReviewSection(result: AgentRunResult): string[] {
     }
 
     if (feedback.length > 0) {
-        lines.push("**Cambios pedidos durante la revision**", "", ...feedback.map((item) => `- ${item}`), "");
+        lines.push(
+            "**Cambios pedidos durante la revision**",
+            "",
+            ...feedback.map((item) => `- ${item}`),
+            ""
+        );
     }
 
     return lines;

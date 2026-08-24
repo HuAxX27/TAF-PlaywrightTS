@@ -3,18 +3,18 @@
 > Generado automaticamente desde `knowledge-base.json`. **No edites este archivo**:
 > los cambios se pierden en la siguiente corrida. Edita el `.json` y se regenera.
 
-Actualizado: 2026-08-24T17:25:04.767Z
+Actualizado: 2026-08-24T00:00:00.000Z
 
 ## Salud del aprendizaje
 
-| Metrica | Valor |
-| --- | --- |
-| Sesiones registradas | 0 |
-| Specs generados | 22 |
-| Specs que pasaron sin reparacion | 22 (100%) |
-| Promedio de intentos de reparacion | 1 |
-| Preguntas evitadas por hechos conocidos | 0 |
-| Reglas / Recetas / Hechos | 0 / 0 / 0 |
+| Metrica                                 | Valor     |
+| --------------------------------------- | --------- |
+| Sesiones registradas                    | 0         |
+| Specs generados                         | 0         |
+| Specs que pasaron sin reparacion        | 0         |
+| Promedio de intentos de reparacion      | 0         |
+| Preguntas evitadas por hechos conocidos | 0         |
+| Reglas / Recetas / Hechos               | 0 / 0 / 0 |
 
 Si el promedio de reparaciones no baja con las sesiones, las reglas estan mal
 redactadas o no se estan respetando: revisa la columna de incumplimientos.

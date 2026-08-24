@@ -17,14 +17,12 @@ function num(value: string | undefined, fallback: number): number {
 export const agentConfig = {
     root: ROOT,
     testsDir: resolveFromRoot(process.env.TESTS_DIR, "tests"),
+    /** Los specs nuevos viven aqui hasta que un QA los promueve a la suite aprobada. */
+    candidatesDir: resolveFromRoot(process.env.CANDIDATES_DIR, "tests/candidates"),
     artifactsDir: resolveFromRoot(process.env.ARTIFACTS_DIR, "agent/artifacts"),
-    storyDir: resolveFromRoot(process.env.STORY_DIR, "agent/stories"),
-    testCaseDir: resolveFromRoot(process.env.TESTCASE_DIR, "agent/testcases"),
     fixturesPath: resolveFromRoot(process.env.FIXTURES_PATH, "src/fixtures/test.ts"),
 
-    storySource: process.env.STORY_SOURCE ?? "file",
-    testCaseSource: process.env.TESTCASE_SOURCE ?? "file",
-    provider: process.env.LLM_PROVIDER ?? "mock",
+    provider: process.env.LLM_PROVIDER ?? "codemie",
 
     temperature: num(process.env.LLM_TEMPERATURE, 0.2),
     timeoutMs: num(process.env.LLM_TIMEOUT_MS, 120_000),

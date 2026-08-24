@@ -1,17 +1,20 @@
 import { availableProviders } from "./llm";
 import { AbortedByHumanError, runAgent, type RunOptions } from "./pipeline";
 import { generateLearningReport } from "./framework/learning";
+import { agentConfig } from "./config";
+import * as fs from "fs";
+import * as path from "path";
 
 const HELP = `
-Agente AQA - de la User Story (o de un TC ya definido) a los tests automatizados
+Agente AQA - de Test Cases de Xray a candidates de Playwright
 
-  npm run agent -- <CLAVE> [opciones]
+  npm run agent -- <CLAVE-XRAY> [opciones]
 
 Opciones
-  --mode=story|testcase  "story" disena TCs desde una User Story (default).
-                         "testcase" toma un TC ya definido (p.ej. Xray) y genera el spec directo.
-  --source=<nombre>      De donde se lee la clave. modo story: jira|file. modo testcase: xray|file.
-                         (default: STORY_SOURCE / TESTCASE_SOURCE del .env, segun el modo)
+  --jql=<consulta>        Genera candidates para hasta 100 Tests que coincidan con JQL.
+  --test-plan=<CLAVE>     Genera candidates para los Tests de un Test Plan de Xray.
+  --keys=A,B,C            Genera candidates para varias claves Xray.
+  --promote=<ruta>        Promueve un candidate revisado a tests/ui o tests/api.
   --provider=<nombre>    Proveedor de IA: ${availableProviders().join(" | ")}
   --dry-run              Analiza y reporta, pero no escribe ningun spec
   --include-partial      Tambien genera codigo para los casos cubiertos a medias
@@ -25,18 +28,17 @@ Involucramiento humano (por defecto activo, se apaga con --yes)
   3. Aprueba cada spec generado, o pide que se regenere con tu feedback.
   4. Al cerrar, compara el TC original contra el codigo y te muestra que escenarios quedaron sin cubrir.
 
-Separacion UI / API
-  Cada test case se clasifica como UI o API y el spec cae en tests/ui/<modulo>/ o
-  tests/api/<modulo>/, con las convenciones de agent/docs/CONVENTIONS-UI.md o
-  CONVENTIONS-API.md. El <modulo> se toma del prefijo "[modulo]" del titulo, del
-  primer tag de dominio, o "generated" como ultimo recurso.
+Salida segura
+  Cada test case se clasifica como UI o API y genera un candidate en
+  tests/candidates/<ui|api>/<modulo>/. La suite normal los ignora; el agente los
+  ejecuta con AQA_INCLUDE_CANDIDATES=true durante la validacion.
 
 Ejemplos
-  npm run agent -- DEMO-1 --source=file --provider=mock
-  npm run agent -- DEMO-1 --source=file --provider=gemini
-  npm run agent -- CIN-1234 --source=jira --provider=codemie --dry-run
-  npm run agent -- CINE-34 --mode=testcase --source=xray --provider=codemie
-  npm run agent -- CINE-34 --mode=testcase --source=xray --provider=codemie --yes
+  npm run agent -- PROJ-123 --provider=codemie
+  npm run agent -- --keys=PROJ-123,PROJ-124 --provider=codemie --yes
+  npm run agent -- --test-plan=PROJ-PLAN-7 --provider=codemie
+  npm run agent -- --jql="project = PROJ AND labels = regression" --dry-run
+  npm run agent -- --promote=tests/candidates/ui/account/PROJ-123-profile.spec.ts
   npm run agent -- --learning-report
 `;
 
@@ -44,6 +46,7 @@ type ParseResult =
     | { status: "ok"; options: RunOptions }
     | { status: "help" }
     | { status: "learning-report" }
+    | { status: "promote"; candidatePath: string }
     | { status: "error"; message: string };
 
 function parseArgs(argv: string[]): ParseResult {
@@ -52,10 +55,15 @@ function parseArgs(argv: string[]): ParseResult {
     if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
         return { status: "help" };
     }
-    
+
     // Comando especial para reporte de aprendizaje
     if (args.includes("--learning-report")) {
         return { status: "learning-report" };
+    }
+
+    const promotion = args.find((arg) => arg.startsWith("--promote="));
+    if (promotion) {
+        return { status: "promote", candidatePath: promotion.slice("--promote=".length).trim() };
     }
 
     const positional = args.filter((arg) => !arg.startsWith("--"));
@@ -66,27 +74,91 @@ function parseArgs(argv: string[]): ParseResult {
             .slice(1)
             .join("=");
 
-    if (positional.length === 0) {
-        return { status: "error", message: "Falta la clave de la historia (por ejemplo: DEMO-1)." };
+    const jql = flag("jql");
+    const testPlan = flag("test-plan");
+    const keys = flag("keys");
+    const selectors = [jql, testPlan, keys].filter(Boolean);
+
+    if (selectors.length > 1 || (selectors.length > 0 && positional.length > 0)) {
+        return {
+            status: "error",
+            message: "Usa una sola entrada: clave, --jql, --test-plan o --keys.",
+        };
+    }
+    if (selectors.length === 0 && positional.length !== 1) {
+        return {
+            status: "error",
+            message: "Indica una clave Xray o uno de --jql, --test-plan, --keys.",
+        };
     }
 
-    const mode = flag("mode");
-    if (mode && mode !== "story" && mode !== "testcase") {
-        return { status: "error", message: `--mode debe ser "story" o "testcase" (recibido: ${mode}).` };
-    }
+    const selector = jql
+        ? `jql:${jql}`
+        : testPlan
+          ? `plan:${testPlan}`
+          : keys
+            ? `keys:${keys}`
+            : positional[0];
 
     return {
         status: "ok",
         options: {
-            storyKey: positional[0],
-            source: flag("source"),
+            selector,
             provider: flag("provider"),
-            mode: mode as RunOptions["mode"],
             dryRun: args.includes("--dry-run"),
             includePartial: args.includes("--include-partial"),
             nonInteractive: args.includes("--yes"),
         },
     };
+}
+
+/** Promocion explicita y segura; nunca se hace automaticamente tras una generacion. */
+function promoteCandidate(candidatePath: string): void {
+    const root = agentConfig.root;
+    const candidateRoot = path.resolve(agentConfig.candidatesDir);
+    const absoluteCandidate = path.resolve(root, candidatePath);
+    const relativeCandidate = path.relative(candidateRoot, absoluteCandidate).replace(/\\/g, "/");
+
+    if (
+        relativeCandidate.startsWith("../") ||
+        relativeCandidate === "" ||
+        !/^(ui|api)\/[A-Za-z0-9._/-]+\.spec\.ts$/.test(relativeCandidate)
+    ) {
+        throw new Error(
+            "--promote debe apuntar a un .spec.ts dentro de tests/candidates/ui o tests/candidates/api."
+        );
+    }
+    if (!fs.existsSync(absoluteCandidate)) {
+        throw new Error(`No existe el candidate: ${candidatePath}`);
+    }
+
+    const content = fs.readFileSync(absoluteCandidate, "utf-8");
+    if (/\bTODO\b|\bPENDIENTE\b|test\.fixme\s*\(|waitForTimeout\s*\(/i.test(content)) {
+        throw new Error(
+            "El candidate contiene placeholders o patrones prohibidos; no puede promoverse."
+        );
+    }
+
+    const target = path.resolve(agentConfig.testsDir, relativeCandidate);
+    const testsRoot = path.resolve(agentConfig.testsDir);
+    if (!target.startsWith(`${testsRoot}${path.sep}`)) {
+        throw new Error("El destino de promocion queda fuera de tests/.");
+    }
+    if (fs.existsSync(target)) {
+        throw new Error(`Ya existe un spec aprobado en ${path.relative(root, target)}.`);
+    }
+
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.renameSync(absoluteCandidate, target);
+    fs.writeFileSync(
+        target,
+        content.replace(
+            "// Candidate generado por el Agente AQA - no ejecutar en regresion hasta promoverlo.",
+            "// Generado por el Agente AQA - promovido tras revision humana."
+        ),
+        "utf-8"
+    );
+    console.log(`\nPromovido: ${path.relative(root, target).replace(/\\/g, "/")}`);
 }
 
 async function main(): Promise<void> {
@@ -96,13 +168,18 @@ async function main(): Promise<void> {
         console.log(HELP);
         return;
     }
-    
+
     if (parsed.status === "learning-report") {
         console.log("\nBase de conocimiento del agente (agent/knowledge/KNOWLEDGE.md):\n");
         console.log(generateLearningReport());
         console.log(
             "\nEste archivo vive en agent/knowledge/ y se versiona en git: compartelo con el equipo."
         );
+        return;
+    }
+
+    if (parsed.status === "promote") {
+        promoteCandidate(parsed.candidatePath);
         return;
     }
 
@@ -131,7 +208,7 @@ async function main(): Promise<void> {
 
     if (failed.length > 0) {
         console.log(
-            `\n${failed.length} spec(s) requieren revision manual (diagnostico en el encabezado del spec, marcados como test.fixme).`
+            `\n${failed.length} candidate(s) requieren revision manual; no entraron a la suite aprobada.`
         );
         process.exitCode = 1;
         return;
@@ -152,7 +229,7 @@ async function main(): Promise<void> {
         return;
     }
 
-    console.log("\nListo.");
+    console.log("\nCandidates listos. Promuevelos solo despues de revisar el reporte y el diff.");
 }
 
 main().catch((error: unknown) => {

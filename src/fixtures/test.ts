@@ -1,32 +1,18 @@
 import { test as base } from "@playwright/test";
-import { HomePage } from "../pages/HomePage";
 import { ApiClient } from "../api/apiClient";
-import { UserService } from "../api/services/userService";
 
 type Fixtures = {
-    homePage: HomePage;
     apiClient: ApiClient;
-    userService: UserService;
 };
 
 export const test = base.extend<Fixtures>({
-    //Page Objects
-    homePage: async ({ page }, use) => {
-        await use(new HomePage(page));
-    },
-
-    //Api Client
-    // El destructuring vacio es el idiom de Playwright para "este fixture no
-    // depende de ningun otro"; no-empty-pattern no lo entiende.
+    // Cliente HTTP generico. Los fixtures de dominio se agregan cuando los TCs
+    // reales requieran Page Objects o Services concretos.
     // eslint-disable-next-line no-empty-pattern
     apiClient: async ({}, use) => {
         const client = await ApiClient.create();
         await use(client);
         await client.dispose();
-    },
-
-    userService: async ({ apiClient }, use) => {
-        await use(new UserService(apiClient));
     },
 });
 

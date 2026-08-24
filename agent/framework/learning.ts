@@ -142,7 +142,14 @@ export class SessionRecorder {
 export async function closeSessionLearning(
     provider: LlmProvider,
     recorder: SessionRecorder
-): Promise<SessionLearningSummary> {
+): Promise<SessionLearningSummary | undefined> {
+    // En dry-runs y CI puede pedirse que no haya ninguna escritura en la base
+    // versionada; antes el flag solo evitaba la llamada al LLM.
+    if (!agentConfig.enableLearning) {
+        console.log("     aprendizaje desactivado (ENABLE_LEARNING=false)");
+        return undefined;
+    }
+
     const session = recorder.snapshot();
     const knowledge = loadKnowledge();
 
@@ -158,10 +165,8 @@ export async function closeSessionLearning(
         notes: "",
     };
 
-    if (agentConfig.enableLearning && recorder.hasSomethingToLearn()) {
+    if (recorder.hasSomethingToLearn()) {
         distilled = await distill(provider, session, knowledge);
-    } else if (!agentConfig.enableLearning) {
-        console.log("     aprendizaje desactivado (ENABLE_LEARNING=false)");
     }
 
     const merged = mergeDistilled(knowledge, distilled, session.sessionKey);

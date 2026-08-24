@@ -4,12 +4,8 @@ import { env } from "./src/config/env";
 
 dotenv.config();
 
-/**
- * Los archivos *.setup.ts son proyectos de setup (login, seeding), no pruebas.
- * Se excluyen de los proyectos de navegador para que `npx playwright test` no
- * los ejecute como si fueran specs.
- */
-const IGNORE_SETUP_FILES = /.*\.setup\.ts/;
+const IGNORE_CANDIDATES = /.*[\\/]candidates[\\/].*\.spec\.ts/;
+const includeCandidates = process.env.AQA_INCLUDE_CANDIDATES === "true";
 
 /**
  * See https://playwright.dev/docs/test-configuration.
@@ -40,30 +36,21 @@ export default defineConfig({
 
     /* Configure projects for major browsers */
     projects: [
-        /**
-         * Login compartido (opt-in). Descomenta este proyecto y agrega
-         * `dependencies: ["setup"]` + `storageState: STORAGE_STATE` a los proyectos
-         * de navegador cuando el sitio bajo prueba requiera sesion.
-         */
-        // {
-        //   name: "setup",
-        //   testMatch: IGNORE_SETUP_FILES,
-        // },
         {
             name: "chromium",
-            testIgnore: IGNORE_SETUP_FILES,
+            testIgnore: includeCandidates ? [] : IGNORE_CANDIDATES,
             use: { ...devices["Desktop Chrome"] },
         },
 
         {
             name: "firefox",
-            testIgnore: IGNORE_SETUP_FILES,
+            testIgnore: includeCandidates ? [] : IGNORE_CANDIDATES,
             use: { ...devices["Desktop Firefox"] },
         },
 
         {
             name: "webkit",
-            testIgnore: IGNORE_SETUP_FILES,
+            testIgnore: includeCandidates ? [] : IGNORE_CANDIDATES,
             use: { ...devices["Desktop Safari"] },
         },
 

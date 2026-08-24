@@ -48,6 +48,7 @@ export function executeTest(specPath: string, testName?: string): TestExecutionO
         cwd: agentConfig.root,
         timeoutMs: 180_000,
         env: {
+            AQA_INCLUDE_CANDIDATES: "true",
             PWTEST_TRACE: "on",
             PWTEST_SCREENSHOT: "on",
         },
@@ -111,7 +112,7 @@ export function executeTestWithRetries(
     while (attempts < maxAttempts) {
         attempts++;
         console.log(`       ejecutando test (intento ${attempts}/${maxAttempts})...`);
-        
+
         lastResult = executeTest(specPath, testName);
 
         if (lastResult.passed) {
@@ -254,7 +255,11 @@ function parseErrorsFromStderr(stderr: string): TestError[] {
 
     for (const line of lines) {
         // Detectar inicio de error
-        if (line.includes("Error:") || line.includes("TimeoutError:") || line.includes("Test timeout of")) {
+        if (
+            line.includes("Error:") ||
+            line.includes("TimeoutError:") ||
+            line.includes("Test timeout of")
+        ) {
             if (currentError) {
                 currentError.stack = stackLines.join("\n");
                 errors.push(currentError as TestError);

@@ -18,7 +18,7 @@ jobs:
             - run: npx tsc --noEmit
             - run: npm run format:check
 
-    agent:
+    agent-cli:
         needs: lint
         runs-on: ubuntu-latest
         timeout-minutes: 10
@@ -29,23 +29,10 @@ jobs:
                   node-version: 22
                   cache: "npm"
             - run: npm ci
-            # El proveedor mock no usa red ni API keys: verifica que el pipeline del
-            # agente sigue en pie (historia -> test cases -> cobertura -> codigo).
-            - name: Agente AQA (proveedor mock)
-              run: npm run agent:demo
-              env:
-                  BASE_URL: https://example.com
-            - name: Upload artefactos del agente
-              if: always()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: agent-artifacts
-                  # Los specs generados caen en tests/<modulo>/, marcados con
-                  # "// Generado por el Agente AQA" al tope del archivo.
-                  path: |
-                      agent/artifacts/
-                      tests/
-                  retention-days: 7
+            # Xray y CodeMie son integraciones privadas; este job verifica el
+            # contrato del CLI sin simular ni escribir specs incompletos.
+            - name: Agente AQA CLI
+              run: npm run agent -- --help
 
     test:
         needs: lint
@@ -66,7 +53,7 @@ jobs:
             - name: Install Playwright Browsers
               run: npx playwright install --with-deps
             - name: Run Playwright tests
-              run: npx playwright test --shard=${{ matrix.shard }}/2
+              run: npx playwright test --pass-with-no-tests --shard=${{ matrix.shard }}/2
               env:
                   BASE_URL: ${{ secrets.BASE_URL }}
                   USER_EMAIL: ${{ secrets.USER_EMAIL }}

@@ -38,7 +38,9 @@ export function loadKnowledge(): KnowledgeBase {
     }
 
     try {
-        const parsed = JSON.parse(fs.readFileSync(KNOWLEDGE_FILE, "utf-8")) as Partial<KnowledgeBase>;
+        const parsed = JSON.parse(
+            fs.readFileSync(KNOWLEDGE_FILE, "utf-8")
+        ) as Partial<KnowledgeBase>;
         return {
             version: parsed.version ?? CURRENT_VERSION,
             updatedAt: parsed.updatedAt ?? new Date().toISOString(),
@@ -523,10 +525,7 @@ export function renderKnowledgeMarkdown(knowledge: KnowledgeBase): string {
     if (knowledge.facts.length === 0) {
         lines.push("_Todavia no hay hechos registrados._", "");
     } else {
-        lines.push(
-            "| Area | Pregunta que responde | Dato | Origen |",
-            "| --- | --- | --- | --- |"
-        );
+        lines.push("| Area | Pregunta que responde | Dato | Origen |", "| --- | --- | --- | --- |");
         for (const fact of [...knowledge.facts].sort((a, b) => a.area.localeCompare(b.area))) {
             lines.push(
                 `| ${cell(fact.area)} | ${cell(fact.question)} | ${cell(fact.answer)} | ${fact.source === "human" ? "QA" : "inferido"} |`
@@ -557,7 +556,7 @@ export function renderKnowledgeMarkdown(knowledge: KnowledgeBase): string {
         "- **Borrar una leccion mala:** quita su entrada del `.json` y commitea.",
         "- **Corregir la redaccion:** editala en el `.json`; se conserva su historial.",
         "- **Agregar conocimiento a mano:** copia una entrada existente, ponle un id nuevo",
-        "  y `\"origin\": \"seed\"` (reglas) o `\"source\": \"human\"` (hechos).",
+        '  y `"origin": "seed"` (reglas) o `"source": "human"` (hechos).',
         "- **Reglas con muchos incumplimientos:** senal de que estan ambiguas. Reescribelas",
         "  en imperativo y con un trigger concreto.",
         "- **Nunca** guardes contrasenas, tokens ni secretos aqui: este archivo va al repo.",

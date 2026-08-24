@@ -1,19 +1,19 @@
 import type {
+    AutomationPlan,
     AnsweredQuestion,
     ExistingTest,
     KnowledgeBase,
     SessionLog,
     TestCase,
     TestKind,
-    UserStory,
+    XrayRunContext,
 } from "./types";
 
 /**
  * Marcadores de tarea. Van en texto plano dentro del prompt para que cualquier
- * proveedor (incluido el mock determinista) sepa que se le esta pidiendo.
+ * proveedor sepa con precision que tipo de respuesta debe producir.
  */
 export const TASK = {
-    testCases: "generar-test-cases",
     clarify: "detectar-dudas",
     refine: "refinar-test-cases",
     classify: "clasificar-tipo-test",
@@ -29,71 +29,33 @@ export type TaskMarker = (typeof TASK)[keyof typeof TASK];
 export const SYSTEM_PROMPT = `Eres un Lead QA Automation Engineer con experiencia en Playwright + TypeScript.
 Reglas innegociables:
 - Respondes SOLO con lo que se te pide (JSON o codigo), sin introducciones ni explicaciones.
-- No inventas funcionalidad que la historia no describe.
-- Si un dato no esta en la historia, lo marcas como precondicion, no lo adivinas.`;
+- No inventas funcionalidad que el Test Case de Xray no describe.
+- Si un dato no esta en el Test Case, lo marcas como precondicion, no lo adivinas.`;
 
 function json(value: unknown): string {
     return "```json\n" + JSON.stringify(value, null, 2) + "\n```";
 }
 
-/** Paso 1: User Story -> Test Cases de negocio. */
-export function testCasesPrompt(story: UserStory): string {
-    return `TAREA: ${TASK.testCases}
-
-Analiza esta User Story y disena la bateria de test cases que la cubre.
-
-${json(story)}
-
-Criterios de diseno:
-- Un test case por comportamiento verificable. No agrupes varios criterios en uno.
-- Cubre camino feliz, casos borde y casos negativos derivados de los criterios.
-- "level": "e2e" si requiere navegador, "api" si se valida por servicio, "visual" o "a11y" si aplica.
-- "kind": "api" si el escenario se verifica llamando a un servicio (HTTP/REST/GraphQL) sin abrir
-  navegador; "ui" si necesita interactuar con la interfaz. Es un campo obligatorio.
-- "priority": "critical" para el flujo principal de negocio, luego "high" | "medium" | "low".
-- "tags": usa las etiquetas del framework: @smoke, @regression, @critical, @negative y una de dominio.
-  Agrega @api a los test cases de tipo api y @ui a los de tipo ui.
-- "automatable": false SOLO si el escenario depende de algo que una prueba automatizada no puede observar;
-  en ese caso explica el motivo en "notAutomatableReason".
-
-Responde UNICAMENTE con un array JSON con esta forma exacta:
-[
-  {
-    "id": "TC-01",
-    "title": "string",
-    "level": "e2e",
-    "kind": "ui",
-    "priority": "critical",
-    "tags": ["@smoke"],
-    "preconditions": ["string"],
-    "steps": ["string"],
-    "expectedResult": "string",
-    "automatable": true,
-    "notAutomatableReason": ""
-  }
-]`;
-}
-
 /** Paso 1b: que dudas o supuestos quedan abiertos y hay que preguntarle al humano. */
-export function clarifyPrompt(story: UserStory, testCases: TestCase[]): string {
+export function clarifyPrompt(xray: XrayRunContext, testCases: TestCase[]): string {
     return `TAREA: ${TASK.clarify}
 
-Estos son los test cases que disenaste para la historia.
+Estos son Test Cases importados desde Xray.
 
-HISTORIA:
-${json(story)}
+CONTEXTO DE LA CORRIDA:
+${json(xray)}
 
 TEST CASES:
 ${json(testCases)}
 
 Identifica UNICAMENTE lo que tuviste que asumir o lo que quedo ambiguo y que, si se resuelve mal,
 haria que el test automatizado pruebe algo distinto a lo que el negocio espera. Ejemplos de dudas
-legitimas: datos de prueba concretos que no estan en la historia (usuario, tarjeta, sucursal),
-ambientes o URLs, mensajes de error exactos, cual es el comportamiento correcto cuando la historia
+legitimas: datos de prueba concretos que no estan en el Test Case (usuario, tarjeta, sucursal),
+ambientes o URLs, mensajes de error exactos, cual es el comportamiento correcto cuando el Test Case
 no lo dice, si un escenario se valida por UI o por API, precondiciones que alguien debe preparar.
 
 Reglas:
-- NO preguntes cosas que la historia ya responde.
+- NO preguntes cosas que el Test Case ya responde.
 - NO preguntes por detalles de implementacion del framework (locators, nombres de archivos).
 - Maximo 6 preguntas, ordenadas de la que mas bloquea a la que menos.
 - Si no hay ninguna duda real, responde con un array vacio [].
@@ -114,7 +76,7 @@ Responde UNICAMENTE con un array JSON:
 
 /** Paso 1c: reescribir los test cases con las respuestas del humano aplicadas. */
 export function refinePrompt(
-    story: UserStory,
+    xray: XrayRunContext,
     testCases: TestCase[],
     answers: AnsweredQuestion[],
     feedback: string | undefined
@@ -131,8 +93,8 @@ export function refinePrompt(
 Actualiza los test cases incorporando la informacion que dio el QA. Esta informacion es la
 fuente de verdad: gana sobre cualquier supuesto anterior tuyo.
 
-HISTORIA:
-${json(story)}
+CONTEXTO DE LA CORRIDA:
+${json(xray)}
 
 TEST CASES ACTUALES:
 ${json(testCases)}
@@ -215,6 +177,34 @@ export interface CodegenContext {
     humanFeedback?: string;
     /** Hechos del dominio confirmados en sesiones anteriores (agent/knowledge/). */
     domainFacts?: string;
+    /** Plan producido antes de codegen; evita que el modelo rediseñe el caso al escribir. */
+    automationPlan?: AutomationPlan;
+}
+
+/** El plan separa razonamiento de implementacion y deja una pieza auditable. */
+export function automationPlanPrompt(testCase: TestCase, kind: TestKind): string {
+    return `TAREA: plan-automatizacion
+
+Convierte este Test Case YA definido en Xray en un plan de automatizacion. No escribas codigo,
+no inventes pasos de negocio y no declares locators. Debes conservar cada accion y resultado
+esperado del test case como evidencia o assertion verificable.
+
+TEST CASE:
+${json(testCase)}
+
+TIPO: ${kind.toUpperCase()}
+
+Responde SOLO JSON valido:
+{
+  "testCaseId": "${testCase.id}",
+  "kind": "${kind}",
+  "module": "dominio-funcional",
+  "startPath": "/ruta-inicial o /",
+  "requiredEvidence": ["elemento o estado que debe observarse antes de generar"],
+  "assertions": ["assertion observable por cada expected result"],
+  "filesToModify": ["src/pages/DomainPage.ts", "spec"],
+  "risks": ["precondicion o dato que necesita confirmacion"]
+}`;
 }
 
 const FILE_FORMAT_RULES = `Responde con uno o mas bloques con este formato EXACTO, uno por archivo:
@@ -234,8 +224,7 @@ const UI_CODEGEN_RULES = `REGLAS PARA UN TEST DE UI:
 - Importa test y expect desde "RUTA_IMPORT_FIXTURES" en el spec, nunca desde "@playwright/test".
 - El spec NO declara locators: viven en el Page Object (src/pages/) o Component (src/components/).
 - Si el snapshot de accesibilidad esta disponible, TODOS los locators deben poder resolverse con
-  esos roles/textos reales. Si no esta disponible, es la UNICA situacion en la que puedes dejar un
-  TODO explicando que locator falta verificar.
+  esos roles/textos reales. No inventes selectores que contradigan la evidencia disponible.
 - Si necesitas un Page Object o Component que no existe, CREALO completo (constructor, locators,
   metodos de accion) siguiendo el patron de los que ya existen en el framework.
 - Si necesitas agregar un metodo/locator a un Page Object o Component YA existente, reescribe ese
@@ -245,16 +234,8 @@ const UI_CODEGEN_RULES = `REGLAS PARA UN TEST DE UI:
 - Locators por rol/nombre accesible (getByRole), luego getByText, ultimo recurso getByTestId.
   Prohibidos los selectores CSS de clases.
 - Nada de waitForTimeout: usa aserciones con auto-waiting o waitForURL / waitForLoadState.
-
-OBSTACULOS CONOCIDOS DEL SITIO (el test debe manejarlos o fallara por timeout):
-- La home abre un MODAL PROMOCIONAL que tapa la pagina e intercepta el scroll y los clicks.
-  Antes de interactuar con cualquier elemento, cierra los overlays visibles con un helper
-  reutilizable e idempotente en el Page Object (no en el spec). El helper debe buscar el boton
-  de cierre por rol/nombre accesible (/cerrar|close/i), usar .first(), comprobar visibilidad con
-  timeout corto y NO fallar si el overlay no aparece.
-- Puede aparecer un banner de cookies/aviso de privacidad fijo al pie: cierralo en el mismo helper.
-- El footer carga contenido de forma diferida: hace scroll al elemento footer antes de resolver
-  locators internos.`;
+- No asumas overlays, banners, carga diferida ni rutas propias de ejecuciones anteriores. Solo
+  implementa un manejo especial cuando el Test Case, la exploracion o un fallo reproducido lo prueben.`;
 
 const API_CODEGEN_RULES = `REGLAS PARA UN TEST DE API:
 - Importa test y expect desde "RUTA_IMPORT_FIXTURES" en el spec, nunca desde "@playwright/test".
@@ -300,15 +281,16 @@ ${context.kindConventions}
 Asi esta construido el framework. Reutiliza lo que ya existe; no dupliques ${isApi ? "services ni tipos" : "page objects ni locators"}:
 
 ${context.frameworkContext}
+${context.automationPlan ? `\nPLAN DE AUTOMATIZACION APROBADO PARA ESTE TC (implementalo; no lo rediseñes):\n${json(context.automationPlan)}\n` : ""}
 ${renderHumanInputBlock(context)}${
-    !isApi && context.pageExploration
-        ? `\nSNAPSHOT DE ACCESIBILIDAD REAL DE LA PAGINA (usa estos textos/roles exactos para los locators, NO inventes otros):\n\`\`\`\n${context.pageExploration}\n\`\`\`\n`
-        : ""
-}${
-    !isApi && context.explorationWarning
-        ? `\nADVERTENCIA: no se pudo explorar la pagina en vivo (${context.explorationWarning}). Escribe los locators con el rol/texto mas probable segun el test case, y deja un comentario // TODO: verificar locator contra el sitio real.\n`
-        : ""
-}
+        !isApi && context.pageExploration
+            ? `\nSNAPSHOT DE ACCESIBILIDAD REAL DE LA PAGINA (usa estos textos/roles exactos para los locators, NO inventes otros):\n\`\`\`\n${context.pageExploration}\n\`\`\`\n`
+            : ""
+    }${
+        !isApi && context.explorationWarning
+            ? `\nADVERTENCIA: no se pudo explorar la pagina en vivo (${context.explorationWarning}). Escribe los locators con el rol/texto mas probable segun el test case, y deja un comentario // TODO: verificar locator contra el sitio real.\n`
+            : ""
+    }
 ${(isApi ? API_CODEGEN_RULES : UI_CODEGEN_RULES).replace(/RUTA_IMPORT_FIXTURES/g, context.importPath)}
 
 Reglas comunes:
@@ -504,9 +486,9 @@ REGLAS DE ORO
 - PROHIBIDO extraer lo que ya esta en las convenciones del framework ("usa test.step",
   "usa getByRole", "importa desde el fixture", "no uses waitForTimeout"). Eso ya se le dice
   al modelo en cada prompt; repetirlo solo gasta tokens.
-- PROHIBIDO describir sintomas sin decir que hacer. Mal: "fallo el locator del footer".
-  Bien: "El footer carga en diferido: hazle scrollIntoViewIfNeeded antes de resolver locators
-  internos, o el locator existira pero no sera visible".
+- PROHIBIDO describir sintomas sin decir que hacer. Mal: "fallo el locator".
+  Bien: "El snapshot confirma que el control tiene rol button y nombre Guardar: usa ese contrato
+  accesible en el Page Object en lugar del selector de clase generado".
 - Nada de metricas ni de "se generaron N tests": eso se calcula solo.
 - Si un hecho o regla contradice algo que ya esta en la base, no lo dupliques: reportalo en
   "notes" para que un humano lo revise.
@@ -534,7 +516,7 @@ Responde UNICAMENTE con un objeto JSON:
     {
       "question": "la pregunta que este dato responde",
       "answer": "el dato concreto",
-      "area": "footer"
+      "area": "dominio-funcional"
     }
   ],
   "violatedRules": ["R-003"],

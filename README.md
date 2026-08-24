@@ -1,8 +1,8 @@
 # TAF-PlaywrightTS
 
-Framework de automatización en Playwright + TypeScript, con un **agente AQA** que
-convierte una User Story en test cases y en specs automatizados, sin duplicar lo
-que ya está cubierto.
+Framework de Playwright + TypeScript cuyo producto principal es un **agente AQA**:
+convierte Test Cases existentes de Xray en candidates de automatización trazables
+y validados.
 
 ## Requisitos
 
@@ -21,35 +21,34 @@ prueba realmente los usa.
 
 ## Comandos
 
-| Comando                           | Qué hace                                    |
-| --------------------------------- | ------------------------------------------- |
-| `npm test`                        | Corre toda la suite                         |
-| `npm run test:smoke`              | Solo `@smoke`                               |
-| `npm run test:regression`         | Solo `@regression`                          |
-| `npm run test:critical`           | Solo `@critical`                            |
-| `npm run test:report`             | Abre el reporte HTML                        |
-| `npm run typecheck`               | `tsc --noEmit`                              |
-| `npm run lint` / `lint:fix`       | ESLint                                      |
-| `npm run format` / `format:check` | Prettier                                    |
-| `npm run agent -- <CLAVE> [flags]`     | Agente AQA, comando genérico (User Story o TC ya definido) |
-| `npm run createTestScript -- <CLAVE>`  | Agente AQA, comando simple: TC de Xray -> spec completo     |
-| `npm run agent:demo`                   | Agente AQA en modo demo, sin red ni API key                 |
+| Comando                                | Qué hace                                      |
+| -------------------------------------- | --------------------------------------------- |
+| `npm test`                             | Corre toda la suite                           |
+| `npm run test:smoke`                   | Solo `@smoke`                                 |
+| `npm run test:regression`              | Solo `@regression`                            |
+| `npm run test:critical`                | Solo `@critical`                              |
+| `npm run test:report`                  | Abre el reporte HTML                          |
+| `npm run typecheck`                    | `tsc --noEmit`                                |
+| `npm run lint` / `lint:fix`            | ESLint                                        |
+| `npm run format` / `format:check`      | Prettier                                      |
+| `npm run agent -- <CLAVE> [flags]`     | Candidate desde un Test Case de Xray          |
+| `npm run agent -- --test-plan=<CLAVE>` | Candidates de todos los Tests de un Test Plan |
+| `npm run agent -- --jql="..."`         | Candidates de un lote Xray con JQL            |
 
 ## Estructura
 
 ```
 src/
   api/          ApiClient (Playwright request) y servicios por dominio
-  components/   Componentes reutilizables de UI (footer, header, ...)
+  components/   Componentes reutilizables de UI creados desde TCs reales
   pages/        Page Objects; BasePage tiene lo común
   data/         Factories con faker
   fixtures/     test.ts: los fixtures que consumen los specs
-  config/       env.ts (variables) y paths.ts (storage state)
+  config/       Variables de ambiente
 tests/
   *.spec.ts       Specs escritos a mano
-  <modulo>/       Specs por dominio (footer, login, ...); pueden mezclar
-                  escritos a mano y generados por el agente (marcados con
-                  el comentario "// Generado por el Agente AQA")
+  ui|api/         Specs aprobados que ejecuta la regresión
+  candidates/     Specs generados que se validan aislados antes de promoverlos
 agent/          El agente AQA (ver agent/README.md)
 ```
 
@@ -62,32 +61,22 @@ agent/          El agente AQA (ver agent/README.md)
 - Tags con la firma `test("titulo", { tag: ["@smoke"] }, async ({ ... }) => {})`.
 - Nada de `waitForTimeout`.
 
-### Login compartido
-
-`tests/auth.setup.ts` es una plantilla. Los archivos `*.setup.ts` están excluidos
-de los proyectos de navegador; para activarlos descomenta el proyecto `setup` en
-[playwright.config.ts](playwright.config.ts) y agrega `dependencies: ["setup"]` +
-`storageState: STORAGE_STATE` a los proyectos que necesiten sesión.
-
 ## Agente AQA
 
 ```bash
-npm run agent:demo                      # demo offline, sin red ni API key
-npm run createTestScript -- CINE-34     # TC real de Xray -> spec completo
+npm run agent -- PROJ-123 --provider=codemie
+npm run agent -- --test-plan=PROJ-PLAN-7 --provider=codemie
 ```
 
 ```
-User Story (Jira/archivo)  o  Test Case ya definido (Xray/archivo)
-   → inventario de tests     (playwright test --list)
+Test Case(s) de Xray
+   → plan de automatización → inventario de tests (playwright test --list)
    → análisis de cobertura   (LLM)  covered / partial / missing
-   → exploración en vivo     (Chromium headless -> snapshot de accesibilidad)
-   → spec + Page Objects/fixtures que falten   (LLM)
-   → validación real: tsc + eslint + playwright --list, con reintentos de reparación
+   → exploración en vivo guiada por el plan
+   → candidate + validación estática/E2E/revisión
 ```
 
-El proveedor de IA es intercambiable desde el `.env` (`LLM_PROVIDER`): `mock`
-(offline), `gemini`, `groq`, `openrouter` y `ollama` son gratuitos; `codemie` es
-el corporativo.
+El proveedor de IA es intercambiable desde el `.env` (`LLM_PROVIDER`). `codemie`
+es el proveedor productivo predeterminado.
 
-- **[Guía de uso paso a paso](agent/GUIA.md)** — empieza aquí
-- [Referencia de flags y proveedores](agent/README.md)
+- **[Guía operativa del agente Xray](agent/README.md)** — empieza aquí

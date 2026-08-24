@@ -1,11 +1,8 @@
 /** Contratos compartidos por todo el pipeline del agente AQA. */
 
-export interface UserStory {
-    key: string;
-    title: string;
-    description: string;
-    acceptanceCriteria: string[];
-    labels: string[];
+export interface XrayRunContext {
+    selector: string;
+    label: string;
     url?: string;
 }
 
@@ -32,6 +29,18 @@ export interface TestCase {
     expectedResult: string;
     automatable: boolean;
     notAutomatableReason?: string;
+}
+
+/** Plan verificable antes de escribir codigo. Se conserva como artefacto de la corrida. */
+export interface AutomationPlan {
+    testCaseId: string;
+    kind: TestKind;
+    module: string;
+    startPath: string;
+    requiredEvidence: string[];
+    assertions: string[];
+    filesToModify: string[];
+    risks: string[];
 }
 
 /** Veredicto de clasificacion UI/API de un test case, con su justificacion. */
@@ -147,7 +156,7 @@ export interface GeneratedSpec {
 }
 
 export interface AgentRunResult {
-    story: UserStory;
+    xray: XrayRunContext;
     testCases: TestCase[];
     inventory: ExistingTest[];
     coverage: CoverageItem[];
@@ -157,7 +166,7 @@ export interface AgentRunResult {
     humanReview: HumanReviewRound[];
     finalValidations: FinalValidationResult[];
     /** Que aprendio el agente en esta corrida. */
-    learning: SessionLearningSummary;
+    learning?: SessionLearningSummary;
 }
 
 // ---------------------------------------------------------------------------

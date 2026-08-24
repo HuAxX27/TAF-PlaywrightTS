@@ -58,7 +58,7 @@ function listWithPlaywright(): { tests: ExistingTest[] | null; reason?: string }
     // impriman dotenv, npx o un plugin del config corrompa el parseo.
     const outputFile = path.join(os.tmpdir(), `pw-list-${process.pid}-${Date.now()}.json`);
 
-    const result = run("npx playwright test --list --reporter=json", {
+    const result = run("npx playwright test --list --pass-with-no-tests --reporter=json", {
         cwd: agentConfig.root,
         env: { PLAYWRIGHT_JSON_OUTPUT_NAME: outputFile },
     });

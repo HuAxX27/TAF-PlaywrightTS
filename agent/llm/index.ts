@@ -1,5 +1,4 @@
 import { agentConfig } from "../config";
-import { MockProvider } from "./mock";
 import { OpenAiCompatibleProvider } from "./openAiCompatible";
 import type { LlmProvider } from "./provider";
 
@@ -55,15 +54,11 @@ export const PRESETS: Record<string, Preset> = {
 };
 
 export function availableProviders(): string[] {
-    return ["mock", ...Object.keys(PRESETS)];
+    return Object.keys(PRESETS);
 }
 
 export function createProvider(name = agentConfig.provider): LlmProvider {
     const key = name.trim().toLowerCase();
-
-    if (key === "mock") {
-        return new MockProvider();
-    }
 
     const preset = PRESETS[key];
     if (!preset) {
