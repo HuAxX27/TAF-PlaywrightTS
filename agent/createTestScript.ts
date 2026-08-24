@@ -90,9 +90,9 @@ async function main(): Promise<void> {
         console.log("\nListo. Corre `npx playwright test` y valida el resultado.");
     }
 
-    if (result.learning) {
-        console.log(`\n📊 ${result.learning.newRules} regla(s), ${result.learning.newRecipes} receta(s) y ${result.learning.newFacts} hecho(s) nuevo(s) en agent/knowledge/KNOWLEDGE.md`);
-    }
+    console.log(
+        `\n📊 ${result.learning.newRules} regla(s), ${result.learning.newRecipes} receta(s) y ${result.learning.newFacts} hecho(s) nuevo(s) en agent/knowledge/KNOWLEDGE.md`
+    );
 }
 
 main().catch((error: unknown) => {

@@ -262,7 +262,7 @@ function keywords(text: string): string[] {
 // ---------------------------------------------------------------------------
 
 export interface DistilledKnowledge {
-    rules: Array<Pick<KnowledgeRule, "scope" | "category" | "rule" | "trigger">>;
+    rules: Array<Pick<KnowledgeRule, "scope" | "category" | "rule" | "trigger" | "origin">>;
     recipes: Array<Pick<KnowledgeRecipe, "scope" | "problem" | "code" | "placement">>;
     facts: Array<Pick<KnowledgeFact, "question" | "answer" | "area">>;
     violatedRules: string[];
@@ -316,7 +316,7 @@ export function mergeDistilled(
             category: incoming.category,
             rule: incoming.rule,
             trigger: incoming.trigger,
-            origin: "repair",
+            origin: incoming.origin,
             confirmations: 1,
             violationsAfterLearning: 0,
             firstSeen: now,
@@ -481,12 +481,12 @@ export function renderKnowledgeMarkdown(knowledge: KnowledgeBase): string {
 
             lines.push(`### ${SCOPE_LABEL[scope]}`, "");
             lines.push(
-                "| ID | Regla | Cuando aplica | Confirmada | Incumplida despues |",
-                "| --- | --- | --- | --- | --- |"
+                "| ID | Regla | Cuando aplica | Origen | Confirmada | Incumplida despues |",
+                "| --- | --- | --- | --- | --- | --- |"
             );
             for (const rule of rules.sort((a, b) => score(b) - score(a))) {
                 lines.push(
-                    `| ${rule.id} | ${cell(rule.rule)} | ${cell(rule.trigger)} | ${rule.confirmations}x | ${rule.violationsAfterLearning}x |`
+                    `| ${rule.id} | ${cell(rule.rule)} | ${cell(rule.trigger)} | ${ORIGIN_LABEL[rule.origin]} | ${rule.confirmations}x | ${rule.violationsAfterLearning}x |`
                 );
             }
             lines.push("");
@@ -571,6 +571,13 @@ const SCOPE_LABEL: Record<KnowledgeScope, string> = {
     both: "Todos los tests",
     ui: "Tests de UI",
     api: "Tests de API",
+};
+
+const ORIGIN_LABEL: Record<KnowledgeRule["origin"], string> = {
+    repair: "reparacion",
+    human: "QA",
+    "coverage-gap": "cobertura",
+    seed: "manual",
 };
 
 function cell(text: string): string {

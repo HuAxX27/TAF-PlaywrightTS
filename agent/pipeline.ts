@@ -323,10 +323,8 @@ async function finishRun(args: FinishRunArgs): Promise<AgentRunResult> {
     console.log(`${label()}  Registrando lo aprendido en esta sesion...`);
     recorder.recordHumanReview(humanReview);
     const learning = await closeSessionLearning(provider, recorder);
-    if (learning) {
-        for (const line of describeSessionLearning(learning)) {
-            console.log(`     ${line}`);
-        }
+    for (const line of describeSessionLearning(learning)) {
+        console.log(`     ${line}`);
     }
 
     const result: AgentRunResult = {

@@ -157,7 +157,7 @@ export interface AgentRunResult {
     humanReview: HumanReviewRound[];
     finalValidations: FinalValidationResult[];
     /** Que aprendio el agente en esta corrida. */
-    learning?: SessionLearningSummary;
+    learning: SessionLearningSummary;
 }
 
 // ---------------------------------------------------------------------------

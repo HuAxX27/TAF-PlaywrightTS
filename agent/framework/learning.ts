@@ -142,7 +142,7 @@ export class SessionRecorder {
 export async function closeSessionLearning(
     provider: LlmProvider,
     recorder: SessionRecorder
-): Promise<SessionLearningSummary | undefined> {
+): Promise<SessionLearningSummary> {
     const session = recorder.snapshot();
     const knowledge = loadKnowledge();
 
@@ -221,6 +221,7 @@ function normalizeDistilled(parsed: Partial<DistilledKnowledge>): DistilledKnowl
             category: rule.category ?? "other",
             rule: rule.rule.trim(),
             trigger: rule.trigger?.trim() || "Sin sintoma declarado.",
+            origin: normalizeOrigin(rule.origin),
         }));
 
     const recipes = (parsed.recipes ?? [])
@@ -254,6 +255,10 @@ function normalizeDistilled(parsed: Partial<DistilledKnowledge>): DistilledKnowl
 
 function normalizeScope(scope: unknown): "ui" | "api" | "both" {
     return scope === "ui" || scope === "api" ? scope : "both";
+}
+
+function normalizeOrigin(origin: unknown): "repair" | "human" | "coverage-gap" | "seed" {
+    return origin === "human" || origin === "coverage-gap" || origin === "seed" ? origin : "repair";
 }
 
 /**

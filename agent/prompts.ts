@@ -474,9 +474,9 @@ QUE EXTRAER
 
 1. "rules" - lecciones normativas. Solo de:
    - un error real que hubo que reparar (mira "repairs": compara codeBefore con codeAfter y
-     deduce la regla que habria evitado ese error desde el principio);
-   - una correccion o comentario del humano (mira "humanInput" tipo feedback);
-   - un escenario que el codigo no cubrio (mira "coverageGaps").
+     deduce la regla que habria evitado ese error desde el principio) -> "origin": "repair";
+   - una correccion o comentario del humano (mira "humanInput" tipo feedback) -> "origin": "human";
+   - un escenario que el codigo no cubrio (mira "coverageGaps") -> "origin": "coverage-gap".
    Escribelas en imperativo y autocontenidas: quien las lea sin ver esta sesion debe poder
    aplicarlas. Incluye el "trigger": el sintoma que permite reconocer cuando aplican.
    "scope" es "api" si solo aplica a tests de servicio, "ui" si solo a tests de navegador,
@@ -518,7 +518,8 @@ Responde UNICAMENTE con un objeto JSON:
       "scope": "ui",
       "category": "locator",
       "rule": "instruccion en imperativo, autocontenida",
-      "trigger": "sintoma observable que indica que aplica"
+      "trigger": "sintoma observable que indica que aplica",
+      "origin": "repair"
     }
   ],
   "recipes": [
