@@ -15,6 +15,8 @@
         "test:regression": "playwright test --grep @regression",
         "test:critical": "playwright test --grep @critical",
         "agent": "tsx agent/cli.ts",
+        "promote": "tsx agent/cli.ts promote",
+        "candidates": "tsx agent/cli.ts candidates",
         "agent:learning": "tsx agent/cli.ts --learning-report"
     },
     "keywords": [],

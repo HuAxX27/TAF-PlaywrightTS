@@ -1,13 +1,17 @@
 import { availableProviders } from "./llm";
 import { AbortedByHumanError, runAgent, type RunOptions } from "./pipeline";
 import { generateLearningReport } from "./framework/learning";
-import { agentConfig } from "./config";
-import * as fs from "fs";
-import * as path from "path";
+import { printCandidateStatus, runMainWizard, runPromotionWizard } from "./framework/interactive";
+import { promoteCandidates } from "./framework/promotion";
 
 const HELP = `
 Agente AQA - de Test Cases de Xray a candidates de Playwright
 
+  npm run agent            Abre el asistente guiado (recomendado)
+  npm run promote          Promueve uno o varios candidates listos
+  npm run candidates       Muestra el estado de todos los candidates
+
+Uso avanzado
   npm run agent -- <CLAVE-XRAY> [opciones]
 
 Opciones
@@ -46,14 +50,27 @@ type ParseResult =
     | { status: "ok"; options: RunOptions }
     | { status: "help" }
     | { status: "learning-report" }
+    | { status: "wizard" }
+    | { status: "promotion-wizard" }
+    | { status: "candidates" }
     | { status: "promote"; candidatePath: string }
     | { status: "error"; message: string };
 
 function parseArgs(argv: string[]): ParseResult {
     const args = argv.slice(2);
 
-    if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
+    if (args.length === 0) {
+        return process.stdin.isTTY === true ? { status: "wizard" } : { status: "help" };
+    }
+    if (args.includes("-h") || args.includes("--help")) {
         return { status: "help" };
+    }
+
+    if (args.length === 1 && args[0] === "promote") {
+        return { status: "promotion-wizard" };
+    }
+    if (args.length === 1 && args[0] === "candidates") {
+        return { status: "candidates" };
     }
 
     // Comando especial para reporte de aprendizaje
@@ -112,55 +129,6 @@ function parseArgs(argv: string[]): ParseResult {
     };
 }
 
-/** Promocion explicita y segura; nunca se hace automaticamente tras una generacion. */
-function promoteCandidate(candidatePath: string): void {
-    const root = agentConfig.root;
-    const candidateRoot = path.resolve(agentConfig.candidatesDir);
-    const absoluteCandidate = path.resolve(root, candidatePath);
-    const relativeCandidate = path.relative(candidateRoot, absoluteCandidate).replace(/\\/g, "/");
-
-    if (
-        relativeCandidate.startsWith("../") ||
-        relativeCandidate === "" ||
-        !/^(ui|api)\/[A-Za-z0-9._/-]+\.spec\.ts$/.test(relativeCandidate)
-    ) {
-        throw new Error(
-            "--promote debe apuntar a un .spec.ts dentro de tests/candidates/ui o tests/candidates/api."
-        );
-    }
-    if (!fs.existsSync(absoluteCandidate)) {
-        throw new Error(`No existe el candidate: ${candidatePath}`);
-    }
-
-    const content = fs.readFileSync(absoluteCandidate, "utf-8");
-    if (/\bTODO\b|\bPENDIENTE\b|test\.fixme\s*\(|waitForTimeout\s*\(/i.test(content)) {
-        throw new Error(
-            "El candidate contiene placeholders o patrones prohibidos; no puede promoverse."
-        );
-    }
-
-    const target = path.resolve(agentConfig.testsDir, relativeCandidate);
-    const testsRoot = path.resolve(agentConfig.testsDir);
-    if (!target.startsWith(`${testsRoot}${path.sep}`)) {
-        throw new Error("El destino de promocion queda fuera de tests/.");
-    }
-    if (fs.existsSync(target)) {
-        throw new Error(`Ya existe un spec aprobado en ${path.relative(root, target)}.`);
-    }
-
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.renameSync(absoluteCandidate, target);
-    fs.writeFileSync(
-        target,
-        content.replace(
-            "// Candidate generado por el Agente AQA - no ejecutar en regresion hasta promoverlo.",
-            "// Generado por el Agente AQA - promovido tras revision humana."
-        ),
-        "utf-8"
-    );
-    console.log(`\nPromovido: ${path.relative(root, target).replace(/\\/g, "/")}`);
-}
-
 async function main(): Promise<void> {
     const parsed = parseArgs(process.argv);
 
@@ -178,8 +146,26 @@ async function main(): Promise<void> {
         return;
     }
 
+    if (parsed.status === "wizard") {
+        const action = await runMainWizard();
+        if (action.kind === "done") return;
+        await executeAgent(action.options);
+        return;
+    }
+
+    if (parsed.status === "promotion-wizard") {
+        await runPromotionWizard();
+        return;
+    }
+
+    if (parsed.status === "candidates") {
+        printCandidateStatus();
+        return;
+    }
+
     if (parsed.status === "promote") {
-        promoteCandidate(parsed.candidatePath);
+        const promoted = promoteCandidates([parsed.candidatePath]);
+        promoted.forEach((item) => console.log(`\nPromovido: ${item.target}`));
         return;
     }
 
@@ -190,7 +176,11 @@ async function main(): Promise<void> {
         return;
     }
 
-    const result = await runAgent(parsed.options);
+    await executeAgent(parsed.options);
+}
+
+async function executeAgent(options: RunOptions): Promise<void> {
+    const result = await runAgent(options);
 
     const failed = result.generated.filter((spec) => !spec.validation.ok);
     const incomplete = result.finalValidations.filter((item) => !item.fullyCovered);

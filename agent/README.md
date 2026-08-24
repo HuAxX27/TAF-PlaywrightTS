@@ -39,6 +39,39 @@ LLM_TEMPERATURE=0.1
 
 ## Uso
 
+El flujo recomendado no necesita parámetros:
+
+```bash
+npm run agent
+```
+
+El asistente muestra estas opciones:
+
+1. Generar pruebas desde Xray.
+2. Ver el estado de los candidates.
+3. Promover candidates listos.
+
+Para consultar el estado en cualquier momento:
+
+```bash
+npm run candidates
+```
+
+Para promover uno, varios, un rango o todos los candidates listos:
+
+```bash
+npm run promote
+```
+
+La promoción sólo ofrece candidates con validación E2E aprobada y cobertura
+completa. Corrige automáticamente el import relativo al mover el spec, vuelve a
+validarlo y revierte el lote completo si alguno falla. Cada promoción deja una
+auditoría en `agent/artifacts/promotions/`.
+
+### Uso avanzado
+
+Los parámetros continúan disponibles para CI o usuarios experimentados:
+
 ```bash
 # Un Test Case
 npm run agent -- PROJ-123 --provider=codemie
@@ -56,13 +89,6 @@ npm run agent -- --jql="project = PROJ AND labels = regression" --provider=codem
 Usa `--dry-run` para obtener clasificación, plan e inventario sin escribir
 candidates. `--include-partial` incluye casos que la cobertura marque como
 parcial. `--yes` desactiva preguntas interactivas para CI.
-
-Tras revisar el reporte y el diff de un candidate validado, promuévelo de forma
-explícita:
-
-```bash
-npm run agent -- --promote=tests/candidates/ui/account/PROJ-123-profile.spec.ts
-```
 
 ## Artefactos
 

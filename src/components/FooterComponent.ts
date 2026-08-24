@@ -10,7 +10,10 @@ export class FooterComponent {
         this.page = page;
         this.footer = page.locator("footer");
         this.legalesSection = this.footer.getByText("Legales").locator("..");
-        this.terminosCondicionesLink = this.footer.getByRole("link", { name: "Términos y condiciones", exact: true });
+        this.terminosCondicionesLink = this.footer.getByRole("link", {
+            name: "Términos y condiciones",
+            exact: true,
+        });
     }
 
     async scrollToFooter(): Promise<void> {
