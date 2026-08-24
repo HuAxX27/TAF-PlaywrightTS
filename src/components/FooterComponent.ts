@@ -1,6 +1,8 @@
 import { Page, Locator } from "@playwright/test";
 
 export class FooterComponent {
+    readonly page: Page;
+    readonly container: Locator;
     //Legales
     readonly legalesHeading: Locator;
     readonly terminosYCondicionesGeneralesLink: Locator;
@@ -10,9 +12,9 @@ export class FooterComponent {
     readonly terminosYCondicionesGarantiaCinepolisLink: Locator;
     readonly formatoReclamoGarantiaCinepolisLink: Locator;
 
-    //Politicas
-
-    constructor(private readonly page: Page) {
+    constructor(page: Page) {
+        this.page = page;
+        this.container = page.locator("footer");
         this.legalesHeading = page.getByText("Legales", { exact: true });
         this.terminosYCondicionesGeneralesLink = page.getByRole("link", {
             name: "Términos y condiciones",
@@ -38,5 +40,11 @@ export class FooterComponent {
             name: "Formato de reclamo Garantía Cinépolis",
             exact: true,
         });
+    }
+
+    async scrollIntoView(): Promise<void> {
+        await this.container.scrollIntoViewIfNeeded();
+        // Esperar a que el heading "Legales" esté presente tras el scroll
+        await this.legalesHeading.waitFor({ state: "visible", timeout: 5000 });
     }
 }

@@ -1,6 +1,6 @@
 import { CompletionRequest, LlmProvider } from "./provider";
 import { TASK, type TaskMarker } from "../prompts";
-import type { ExistingTest, TestCase, UserStory } from "../types";
+import type { ExistingTest, TestCase, TestKind, UserStory } from "../types";
 
 /**
  * Proveedor determinista sin red ni API key.
@@ -19,11 +19,27 @@ export class MockProvider implements LlmProvider {
         switch (task) {
             case TASK.testCases:
                 return JSON.stringify(this.buildTestCases(request.prompt), null, 2);
+            case TASK.clarify:
+                return JSON.stringify(this.buildQuestions(request.prompt), null, 2);
+            case TASK.refine:
+                // Sin razonamiento no hay refinamiento posible: devuelve los TCs tal cual.
+                return JSON.stringify(jsonBlocks<TestCase[]>(request.prompt)[1] ?? [], null, 2);
+            case TASK.classify:
+                return JSON.stringify(this.buildKinds(request.prompt), null, 2);
             case TASK.coverage:
                 return JSON.stringify(this.buildCoverage(request.prompt), null, 2);
             case TASK.codegen:
             case TASK.repair:
                 return this.buildSpec(request.prompt);
+            case TASK.finalValidation:
+                return JSON.stringify(this.buildFinalValidation(request.prompt), null, 2);
+            case TASK.distill:
+                // Sin razonamiento no hay nada que destilar de forma confiable.
+                return JSON.stringify(
+                    { rules: [], recipes: [], facts: [], violatedRules: [], notes: "" },
+                    null,
+                    2
+                );
             default:
                 throw new Error(`MockProvider: tarea no reconocida en el prompt (${task})`);
         }
@@ -40,8 +56,9 @@ export class MockProvider implements LlmProvider {
             id: `TC-${String(index + 1).padStart(2, "0")}`,
             title: criterion.replace(/\.$/, ""),
             level: "e2e",
+            kind: "ui",
             priority: index === 0 ? "critical" : "high",
-            tags: ["@regression"],
+            tags: ["@regression", "@ui"],
             preconditions: ["El usuario esta en la pagina principal"],
             steps: ["Navegar a la pagina principal", `Verificar: ${criterion}`],
             expectedResult: criterion,
@@ -52,8 +69,9 @@ export class MockProvider implements LlmProvider {
             id: `TC-${String(cases.length + 1).padStart(2, "0")}`,
             title: "Comportamiento ante datos invalidos o estado inesperado",
             level: "e2e",
+            kind: "ui",
             priority: "medium",
-            tags: ["@regression", "@negative"],
+            tags: ["@regression", "@negative", "@ui"],
             preconditions: ["El usuario esta en la pagina principal"],
             steps: ["Forzar el escenario negativo descrito en la historia"],
             expectedResult: "La aplicacion muestra un mensaje de error controlado",
@@ -61,6 +79,65 @@ export class MockProvider implements LlmProvider {
         });
 
         return cases;
+    }
+
+    /** Una duda fija por cada TC sin precondiciones concretas: suficiente para demostrar el ciclo. */
+    private buildQuestions(prompt: string): Array<Record<string, unknown>> {
+        const testCases = jsonBlocks<TestCase[]>(prompt)[1] ?? [];
+        const vague = testCases.filter(
+            (testCase) => testCase.preconditions.length === 0 || !testCase.expectedResult
+        );
+
+        return vague.slice(0, 3).map((testCase, index) => ({
+            id: `Q-${String(index + 1).padStart(2, "0")}`,
+            question: `Que datos concretos se deben usar para "${testCase.title}"?`,
+            why: "Sin datos concretos el test automatizado los inventaria.",
+            assumptionIfUnanswered: "Se usaran datos generados con faker.",
+            relatedTestCaseIds: [testCase.id],
+        }));
+    }
+
+    /** Clasificacion lexica: verbos HTTP y vocabulario de servicios -> api. */
+    private buildKinds(prompt: string): Array<Record<string, unknown>> {
+        const testCases = jsonBlocks<TestCase[]>(prompt)[0] ?? [];
+
+        return testCases.map((testCase) => {
+            const text = [testCase.title, ...testCase.steps, testCase.expectedResult].join(" ");
+            const kind: TestKind = /\b(api|endpoint|request|response|status\s?code|payload|rest|graphql)\b/i.test(
+                text
+            )
+                ? "api"
+                : "ui";
+
+            return {
+                testCaseId: testCase.id,
+                kind,
+                confidence: 60,
+                rationale: "Regla lexica del proveedor mock.",
+            };
+        });
+    }
+
+    /** Un escenario por paso mas el resultado esperado; el mock no puede leer el codigo. */
+    private buildFinalValidation(prompt: string): Record<string, unknown> {
+        const testCase = jsonBlocks<TestCase>(prompt)[0];
+        const scenarios = [...(testCase?.steps ?? []), testCase?.expectedResult ?? ""]
+            .filter(Boolean)
+            .map((scenario) => ({
+                scenario,
+                status: "partial",
+                evidence: "El proveedor mock no analiza codigo.",
+                gap: "Verificar manualmente con un proveedor de IA real.",
+            }));
+
+        return {
+            testCaseId: testCase?.id ?? "TC",
+            scenarios,
+            missingScenarios: [],
+            extraBehaviors: [],
+            verdict:
+                "El proveedor mock no puede juzgar cobertura real; usa un proveedor de IA para la validacion final.",
+        };
     }
 
     /** Cobertura por solapamiento de palabras significativas con los titulos existentes. */
@@ -93,10 +170,11 @@ export class MockProvider implements LlmProvider {
     private buildSpec(prompt: string): string {
         const testCase = jsonBlocks<TestCase>(prompt)[0];
         const importPath =
-            prompt.match(/RUTA_IMPORT_FIXTURES:\s*(\S+)/)?.[1] ?? "../../src/fixtures/test";
-        const specRelPath = prompt.match(/NOMBRE_ARCHIVO:\s*(\S+)/)?.[1] ?? "tests/generated/tc.spec.ts";
+            prompt.match(/RUTA_IMPORT_FIXTURES:\s*(\S+)/)?.[1] ?? "../../../src/fixtures/test";
+        const specRelPath = prompt.match(/NOMBRE_ARCHIVO:\s*(\S+)/)?.[1] ?? "tests/ui/generated/tc.spec.ts";
+        const kind = prompt.match(/TIPO_DE_TEST:\s*(\S+)/)?.[1]?.toLowerCase() === "api" ? "api" : "ui";
         const title = testCase?.title ?? "Escenario generado";
-        const tags = (testCase?.tags?.length ? testCase.tags : ["@regression"])
+        const tags = (testCase?.tags?.length ? testCase.tags : [`@${kind}`, "@regression"])
             .map((tag) => `"${tag}"`)
             .join(", ");
 
@@ -111,7 +189,23 @@ export class MockProvider implements LlmProvider {
             )
             .join("\n\n");
 
-        const spec = `import { test, expect } from "${importPath}";
+        const spec =
+            kind === "api"
+                ? `import { test, expect } from "${importPath}";
+
+test.describe("${escape(testCase?.id ?? "TC")} - ${escape(title)}", () => {
+    test("${escape(title)}", { tag: [${tags}] }, async ({ apiClient }) => {
+${steps}
+
+        await test.step("Resultado esperado: ${escape(testCase?.expectedResult ?? title)}", async () => {
+            // TODO(mock): el proveedor mock no conoce los endpoints reales del servicio.
+            // Con un proveedor de IA real, aqui va la llamada al service y la asercion del status.
+            expect(apiClient).toBeDefined();
+        });
+    });
+});
+`
+                : `import { test, expect } from "${importPath}";
 
 test.describe("${escape(testCase?.id ?? "TC")} - ${escape(title)}", () => {
     test.beforeEach(async ({ homePage }) => {

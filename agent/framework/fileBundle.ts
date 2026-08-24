@@ -15,6 +15,7 @@ export interface FileBundle {
 export const ALLOWED_SUPPORT_PREFIXES = [
     "src/pages/",
     "src/components/",
+    "src/api/",
     "src/data/",
     "src/fixtures/",
 ] as const;

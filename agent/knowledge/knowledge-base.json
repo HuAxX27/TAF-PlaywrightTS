@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "updatedAt": "2026-08-24T17:25:04.767Z",
+  "rules": [],
+  "recipes": [],
+  "facts": [],
+  "stats": {
+    "sessions": 0,
+    "specsGenerated": 22,
+    "specsPassedFirstTry": 22,
+    "totalRepairAttempts": 22,
+    "averageRepairAttempts": 1,
+    "questionsAvoidedByFacts": 0
+  },
+  "history": []
+}

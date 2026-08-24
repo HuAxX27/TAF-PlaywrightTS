@@ -1,10 +1,8 @@
-//Home Page - Cinepolis Mexico
-
 import { Page } from "@playwright/test";
 import { BasePage } from "./BasePage";
 import { FooterComponent } from "../components/FooterComponent";
 
-export class HomePage extends BasePage {
+export class CarteleraPage extends BasePage {
     readonly footer: FooterComponent;
 
     constructor(page: Page) {
@@ -13,7 +11,7 @@ export class HomePage extends BasePage {
     }
 
     async open(): Promise<void> {
-        await this.goto("/mx");
+        await this.goto("/cartelera");
     }
 
     /** Idempotente: cierra modal promocional y banner de cookies si aparecen. */

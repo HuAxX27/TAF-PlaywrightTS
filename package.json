@@ -16,6 +16,7 @@
         "test:critical": "playwright test --grep @critical",
         "agent": "tsx agent/cli.ts",
         "agent:demo": "tsx agent/cli.ts DEMO-1 --source=file --provider=mock",
+        "agent:learning": "tsx agent/cli.ts --learning-report",
         "createTestScript": "tsx agent/createTestScript.ts"
     },
     "keywords": [],

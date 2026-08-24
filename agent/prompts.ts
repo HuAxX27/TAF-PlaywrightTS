@@ -1,4 +1,12 @@
-import type { ExistingTest, TestCase, UserStory } from "./types";
+import type {
+    AnsweredQuestion,
+    ExistingTest,
+    KnowledgeBase,
+    SessionLog,
+    TestCase,
+    TestKind,
+    UserStory,
+} from "./types";
 
 /**
  * Marcadores de tarea. Van en texto plano dentro del prompt para que cualquier
@@ -6,9 +14,14 @@ import type { ExistingTest, TestCase, UserStory } from "./types";
  */
 export const TASK = {
     testCases: "generar-test-cases",
+    clarify: "detectar-dudas",
+    refine: "refinar-test-cases",
+    classify: "clasificar-tipo-test",
     coverage: "analizar-cobertura",
     codegen: "generar-codigo",
     repair: "reparar-codigo",
+    finalValidation: "validar-cobertura-final",
+    distill: "destilar-aprendizaje",
 } as const;
 
 export type TaskMarker = (typeof TASK)[keyof typeof TASK];
@@ -35,8 +48,11 @@ Criterios de diseno:
 - Un test case por comportamiento verificable. No agrupes varios criterios en uno.
 - Cubre camino feliz, casos borde y casos negativos derivados de los criterios.
 - "level": "e2e" si requiere navegador, "api" si se valida por servicio, "visual" o "a11y" si aplica.
+- "kind": "api" si el escenario se verifica llamando a un servicio (HTTP/REST/GraphQL) sin abrir
+  navegador; "ui" si necesita interactuar con la interfaz. Es un campo obligatorio.
 - "priority": "critical" para el flujo principal de negocio, luego "high" | "medium" | "low".
 - "tags": usa las etiquetas del framework: @smoke, @regression, @critical, @negative y una de dominio.
+  Agrega @api a los test cases de tipo api y @ui a los de tipo ui.
 - "automatable": false SOLO si el escenario depende de algo que una prueba automatizada no puede observar;
   en ese caso explica el motivo en "notAutomatableReason".
 
@@ -46,6 +62,7 @@ Responde UNICAMENTE con un array JSON con esta forma exacta:
     "id": "TC-01",
     "title": "string",
     "level": "e2e",
+    "kind": "ui",
     "priority": "critical",
     "tags": ["@smoke"],
     "preconditions": ["string"],
@@ -54,6 +71,104 @@ Responde UNICAMENTE con un array JSON con esta forma exacta:
     "automatable": true,
     "notAutomatableReason": ""
   }
+]`;
+}
+
+/** Paso 1b: que dudas o supuestos quedan abiertos y hay que preguntarle al humano. */
+export function clarifyPrompt(story: UserStory, testCases: TestCase[]): string {
+    return `TAREA: ${TASK.clarify}
+
+Estos son los test cases que disenaste para la historia.
+
+HISTORIA:
+${json(story)}
+
+TEST CASES:
+${json(testCases)}
+
+Identifica UNICAMENTE lo que tuviste que asumir o lo que quedo ambiguo y que, si se resuelve mal,
+haria que el test automatizado pruebe algo distinto a lo que el negocio espera. Ejemplos de dudas
+legitimas: datos de prueba concretos que no estan en la historia (usuario, tarjeta, sucursal),
+ambientes o URLs, mensajes de error exactos, cual es el comportamiento correcto cuando la historia
+no lo dice, si un escenario se valida por UI o por API, precondiciones que alguien debe preparar.
+
+Reglas:
+- NO preguntes cosas que la historia ya responde.
+- NO preguntes por detalles de implementacion del framework (locators, nombres de archivos).
+- Maximo 6 preguntas, ordenadas de la que mas bloquea a la que menos.
+- Si no hay ninguna duda real, responde con un array vacio [].
+- "assumptionIfUnanswered" es lo que asumirias si nadie contesta: debe ser una decision concreta
+  y accionable, no "se necesita mas informacion".
+
+Responde UNICAMENTE con un array JSON:
+[
+  {
+    "id": "Q-01",
+    "question": "string, una sola pregunta clara y respondible",
+    "why": "string, que se rompe o queda ambiguo si no se responde",
+    "assumptionIfUnanswered": "string, la decision concreta que tomarias",
+    "relatedTestCaseIds": ["TC-01"]
+  }
+]`;
+}
+
+/** Paso 1c: reescribir los test cases con las respuestas del humano aplicadas. */
+export function refinePrompt(
+    story: UserStory,
+    testCases: TestCase[],
+    answers: AnsweredQuestion[],
+    feedback: string | undefined
+): string {
+    const answersBlock = answers
+        .map(
+            (item) =>
+                `- PREGUNTA: ${item.question}\n  RESPUESTA${item.answeredByHuman ? " (del QA)" : " (supuesto aceptado)"}: ${item.answer}\n  AFECTA A: ${item.relatedTestCaseIds.join(", ") || "todos"}`
+        )
+        .join("\n");
+
+    return `TAREA: ${TASK.refine}
+
+Actualiza los test cases incorporando la informacion que dio el QA. Esta informacion es la
+fuente de verdad: gana sobre cualquier supuesto anterior tuyo.
+
+HISTORIA:
+${json(story)}
+
+TEST CASES ACTUALES:
+${json(testCases)}
+
+${answersBlock ? `RESPUESTAS DEL QA:\n${answersBlock}\n` : ""}${feedback ? `\nCAMBIOS QUE PIDIO EL QA EXPLICITAMENTE:\n${feedback}\n` : ""}
+Reglas:
+- Conserva los ids de los test cases que sigan siendo validos; no los renumeres sin necesidad.
+- Aplica los datos concretos que dio el QA dentro de "preconditions", "steps" y "expectedResult".
+- Si una respuesta revela un escenario que falta, agrega el test case correspondiente con id nuevo.
+- Si una respuesta descarta un escenario, quitalo.
+- No dejes texto tipo "TBD", "pendiente" o "<por definir>" en ningun campo.
+- Manten el campo "kind" ("ui" | "api") coherente con la respuesta del QA.
+
+Responde UNICAMENTE con el array JSON completo de test cases, con la misma forma que antes.`;
+}
+
+/** Paso 1d: clasificar los test cases ambiguos entre UI y API. */
+export function classifyPrompt(testCases: TestCase[]): string {
+    return `TAREA: ${TASK.classify}
+
+Clasifica cada test case segun COMO se debe automatizar.
+
+${json(testCases)}
+
+- "api": el comportamiento se verifica llamando directamente a un servicio (REST/GraphQL) y
+  revisando status code, body, headers o contrato. No se necesita navegador.
+- "ui": el comportamiento solo se puede verificar interactuando con la interfaz en un navegador
+  (clicks, formularios, elementos visibles, navegacion).
+
+Si el escenario podria hacerse por los dos caminos, elige el que verifica el RIESGO real que
+describe el test case: si lo que importa es lo que ve el usuario, es "ui"; si lo que importa es
+la respuesta del servicio, es "api".
+
+Responde UNICAMENTE con un array JSON:
+[
+  { "testCaseId": "TC-01", "kind": "ui", "confidence": 85, "rationale": "string" }
 ]`;
 }
 
@@ -88,9 +203,18 @@ export interface CodegenContext {
     frameworkContext: string;
     importPath: string;
     specRelPath: string;
+    /** Convenciones especificas del tipo de test (UI o API). */
+    kind: TestKind;
+    kindConventions: string;
     /** Snapshot real de accesibilidad de la pagina bajo prueba, o vacio si no se pudo explorar. */
     pageExploration?: string;
     explorationWarning?: string;
+    /** Respuestas del QA a las dudas del agente: son fuente de verdad. */
+    humanAnswers?: AnsweredQuestion[];
+    /** Cambios que el QA pidio sobre el codigo generado en una ronda previa. */
+    humanFeedback?: string;
+    /** Hechos del dominio confirmados en sesiones anteriores (agent/knowledge/). */
+    domainFacts?: string;
 }
 
 const FILE_FORMAT_RULES = `Responde con uno o mas bloques con este formato EXACTO, uno por archivo:
@@ -101,38 +225,14 @@ FILE: <ruta relativa desde la raiz del repo>
 \`\`\`
 
 - El primer bloque SIEMPRE es el spec, con ruta exacta "NOMBRE_ARCHIVO" (ver mas abajo).
-- Solo puedes crear o modificar archivos dentro de: src/pages/, src/components/, src/data/, src/fixtures/.
+- Solo puedes crear o modificar archivos dentro de: src/pages/, src/components/, src/api/, src/data/, src/fixtures/.
 - No reescribas un archivo existente completo si solo necesitas agregarle un metodo o locator:
   copia el archivo completo con tu cambio aplicado (el bundle reemplaza el archivo entero).
 - No incluyas explicaciones fuera de los bloques FILE.`;
 
-/** Paso 3: Test Case faltante -> spec de Playwright + Page Objects/Components/fixtures que falten. */
-export function codegenPrompt(testCase: TestCase, context: CodegenContext): string {
-    return `TAREA: ${TASK.codegen}
-
-Escribe el spec de Playwright para este test case, y CUALQUIER Page Object, componente,
-locator o fixture que le falte al framework para que el spec funcione de punta a punta
-sin dejar ningun TODO. El humano solo debe correr el test y revisar el resultado.
-
-${json(testCase)}
-
-RUTA_IMPORT_FIXTURES: ${context.importPath}
-NOMBRE_ARCHIVO: ${context.specRelPath}
-
-Asi esta construido el framework. Reutiliza lo que ya existe; no dupliques page objects ni locators:
-
-${context.frameworkContext}
-${
-    context.pageExploration
-        ? `\nSNAPSHOT DE ACCESIBILIDAD REAL DE LA PAGINA (usa estos textos/roles exactos para los locators, NO inventes otros):\n\`\`\`\n${context.pageExploration}\n\`\`\`\n`
-        : ""
-}${
-    context.explorationWarning
-        ? `\nADVERTENCIA: no se pudo explorar la pagina en vivo (${context.explorationWarning}). Escribe los locators con el rol/texto mas probable segun el test case, y deja un comentario // TODO: verificar locator contra el sitio real.\n`
-        : ""
-}
-Reglas del codigo que devuelvas:
-- Importa test y expect desde "${context.importPath}" en el spec, nunca desde "@playwright/test".
+const UI_CODEGEN_RULES = `REGLAS PARA UN TEST DE UI:
+- Importa test y expect desde "RUTA_IMPORT_FIXTURES" en el spec, nunca desde "@playwright/test".
+- El spec NO declara locators: viven en el Page Object (src/pages/) o Component (src/components/).
 - Si el snapshot de accesibilidad esta disponible, TODOS los locators deben poder resolverse con
   esos roles/textos reales. Si no esta disponible, es la UNICA situacion en la que puedes dejar un
   TODO explicando que locator falta verificar.
@@ -140,16 +240,111 @@ Reglas del codigo que devuelvas:
   metodos de accion) siguiendo el patron de los que ya existen en el framework.
 - Si necesitas agregar un metodo/locator a un Page Object o Component YA existente, reescribe ese
   archivo completo con el cambio aplicado.
-- Si el TC necesita datos de prueba (usuarios, textos), usa o crea un factory en src/data/ con faker;
-  nunca hardcodees credenciales o datos sensibles directo en el spec.
 - Si el fixture de test.ts necesita registrar un Page Object nuevo, reescribelo completo con el
   fixture agregado.
+- Locators por rol/nombre accesible (getByRole), luego getByText, ultimo recurso getByTestId.
+  Prohibidos los selectores CSS de clases.
+- Nada de waitForTimeout: usa aserciones con auto-waiting o waitForURL / waitForLoadState.
+
+OBSTACULOS CONOCIDOS DEL SITIO (el test debe manejarlos o fallara por timeout):
+- La home abre un MODAL PROMOCIONAL que tapa la pagina e intercepta el scroll y los clicks.
+  Antes de interactuar con cualquier elemento, cierra los overlays visibles con un helper
+  reutilizable e idempotente en el Page Object (no en el spec). El helper debe buscar el boton
+  de cierre por rol/nombre accesible (/cerrar|close/i), usar .first(), comprobar visibilidad con
+  timeout corto y NO fallar si el overlay no aparece.
+- Puede aparecer un banner de cookies/aviso de privacidad fijo al pie: cierralo en el mismo helper.
+- El footer carga contenido de forma diferida: hace scroll al elemento footer antes de resolver
+  locators internos.`;
+
+const API_CODEGEN_RULES = `REGLAS PARA UN TEST DE API:
+- Importa test y expect desde "RUTA_IMPORT_FIXTURES" en el spec, nunca desde "@playwright/test".
+- PROHIBIDO usar el fixture "page", abrir navegador, o usar Page Objects / locators / getByRole.
+  Un test de API que abre navegador esta mal escrito.
+- Las llamadas HTTP van en un Service de src/api/services/ (una clase por recurso), NO en el spec.
+  El spec solo prepara datos, invoca el service y hace aserciones.
+- Si el Service que necesitas no existe, CREALO en src/api/services/<recurso>Service.ts siguiendo
+  el patron de los que ya existen, y registralo como fixture en src/fixtures/test.ts.
+- Declara interfaces TypeScript para request y response; nada de "any".
+- El spec debe afirmar EXPLICITAMENTE el status code esperado y los campos relevantes del body.
+  Para verificar el status necesitas la respuesta cruda: usa el APIRequestContext / metodo del
+  service que la exponga en vez de asumir 2xx.
+- Para casos negativos (400, 401, 404, 422) NO uses un metodo que lance excepcion al no ser 2xx:
+  obten la respuesta y verifica status y mensaje de error.
+- Limpia lo que crees (delete del recurso) en un test.afterEach o en el propio test si el escenario
+  crea datos.
+- Datos de prueba desde un factory de src/data/ con faker; nunca credenciales hardcodeadas.
+- No uses timeouts arbitrarios ni sleeps.`;
+
+/** Paso 3: Test Case faltante -> spec de Playwright + Page Objects/Services/fixtures que falten. */
+export function codegenPrompt(testCase: TestCase, context: CodegenContext): string {
+    const isApi = context.kind === "api";
+
+    return `TAREA: ${TASK.codegen}
+
+TIPO_DE_TEST: ${context.kind.toUpperCase()}
+
+Escribe el spec de Playwright para este test case de ${isApi ? "API" : "UI"}, y CUALQUIER
+${isApi ? "service, tipo o factory" : "Page Object, componente, locator o fixture"} que le falte al
+framework para que el spec funcione de punta a punta sin dejar ningun TODO. El humano solo debe
+correr el test y revisar el resultado.
+
+${json(testCase)}
+
+RUTA_IMPORT_FIXTURES: ${context.importPath}
+NOMBRE_ARCHIVO: ${context.specRelPath}
+
+CONVENCIONES OBLIGATORIAS PARA TESTS DE ${context.kind.toUpperCase()}:
+
+${context.kindConventions}
+
+Asi esta construido el framework. Reutiliza lo que ya existe; no dupliques ${isApi ? "services ni tipos" : "page objects ni locators"}:
+
+${context.frameworkContext}
+${renderHumanInputBlock(context)}${
+    !isApi && context.pageExploration
+        ? `\nSNAPSHOT DE ACCESIBILIDAD REAL DE LA PAGINA (usa estos textos/roles exactos para los locators, NO inventes otros):\n\`\`\`\n${context.pageExploration}\n\`\`\`\n`
+        : ""
+}${
+    !isApi && context.explorationWarning
+        ? `\nADVERTENCIA: no se pudo explorar la pagina en vivo (${context.explorationWarning}). Escribe los locators con el rol/texto mas probable segun el test case, y deja un comentario // TODO: verificar locator contra el sitio real.\n`
+        : ""
+}
+${(isApi ? API_CODEGEN_RULES : UI_CODEGEN_RULES).replace(/RUTA_IMPORT_FIXTURES/g, context.importPath)}
+
+Reglas comunes:
 - Envuelve cada paso logico del spec en test.step con una descripcion en espanol.
 - Declara los tags con la firma test("titulo", { tag: [...] }, async ({ ... }) => {}).
-- Nada de waitForTimeout, nada de selectores CSS fragiles.
+- El spec debe cubrir TODOS los pasos y el resultado esperado del test case: una asercion por
+  cada cosa que el test case afirma. No omitas ninguna.
 - Todo el codigo debe compilar con TypeScript en modo strict.
 
 ${FILE_FORMAT_RULES}`;
+}
+
+/** Bloque con las respuestas del QA, para que el codigo no vuelva a inventar lo ya resuelto. */
+function renderHumanInputBlock(context: CodegenContext): string {
+    const answered = (context.humanAnswers ?? []).filter((item) => item.answeredByHuman);
+    const parts: string[] = [];
+
+    if (answered.length > 0) {
+        parts.push(
+            `\nDECISIONES QUE YA TOMO EL QA (son fuente de verdad, respetalas al escribir el codigo):\n${answered
+                .map((item) => `- ${item.question} -> ${item.answer}`)
+                .join("\n")}\n`
+        );
+    }
+
+    if (context.humanFeedback?.trim()) {
+        parts.push(
+            `\nCAMBIOS QUE PIDIO EL QA SOBRE EL CODIGO GENERADO ANTES (aplicalos sin cambiar la intencion del test case):\n${context.humanFeedback.trim()}\n`
+        );
+    }
+
+    if (context.domainFacts?.trim()) {
+        parts.push(`\n${context.domainFacts.trim()}\n`);
+    }
+
+    return parts.join("");
 }
 
 /** Paso 4 (solo si la validacion fallo): reparar el bundle completo con el error real. */
@@ -178,8 +373,170 @@ ${context.frameworkContext}
 
 Corrige EXCLUSIVAMENTE lo que causa esos errores. No cambies la intencion de la prueba ni
 agregues escenarios nuevos. El spec importa desde "${context.importPath}".
+Este es un test de ${context.kind.toUpperCase()}: ${
+        context.kind === "api"
+            ? "no introduzcas navegador, page ni Page Objects."
+            : "manten el patron de Page Objects; el spec no declara locators."
+    }
 
 ${FILE_FORMAT_RULES}
 
 Responde con TODOS los archivos corregidos y completos (spec + soporte), en el mismo formato.`;
+}
+
+/** Paso 5: cierre del ciclo - el TC original vs el codigo que realmente se escribio. */
+export function finalValidationPrompt(
+    testCase: TestCase,
+    specContent: string,
+    supportFiles: Array<{ path: string; content: string }>
+): string {
+    const supportBlock = supportFiles
+        .map((file) => `FILE: ${file.path}\n\`\`\`typescript\n${file.content}\n\`\`\``)
+        .join("\n\n");
+
+    return `TAREA: ${TASK.finalValidation}
+
+Eres el revisor. Compara el TEST CASE ORIGINAL contra el CODIGO que se genero y determina si el
+codigo verifica REALMENTE todo lo que el test case pide.
+
+TEST CASE ORIGINAL (fuente de verdad):
+${json(testCase)}
+
+CODIGO GENERADO (spec):
+\`\`\`typescript
+${specContent}
+\`\`\`
+${supportBlock ? `\nARCHIVOS DE SOPORTE:\n${supportBlock}\n` : ""}
+Como evaluar:
+- Descompon el test case en escenarios verificables: cada paso relevante, cada precondicion que el
+  codigo deba establecer, y CADA afirmacion del resultado esperado por separado.
+- Para cada escenario, busca en el codigo la accion Y la asercion que lo prueban.
+- "covered": el codigo ejecuta el escenario y lo AFIRMA con un expect. Sin expect no esta cubierto.
+- "partial": el codigo ejecuta la accion pero no verifica el resultado, o la asercion es mas debil
+  de lo que el test case pide (ej. el TC exige un texto exacto y el codigo solo valida visibilidad).
+- "missing": el codigo no hace nada al respecto.
+- Un test.step con nombre correcto pero cuerpo vacio, comentado, con TODO o con test.fixme NO cubre nada.
+- En "evidence" cita el fragmento real del codigo (nombre del test.step o la linea del expect).
+- En "extraBehaviors" lista lo que el codigo valida y el test case NO pedia.
+- Se estricto: es peor aprobar un test que no prueba lo que dice, que pedir una correccion de mas.
+
+Responde UNICAMENTE con un objeto JSON:
+{
+  "testCaseId": "${testCase.id}",
+  "scenarios": [
+    {
+      "scenario": "string, el escenario tomado del test case",
+      "status": "covered",
+      "evidence": "string, fragmento real del codigo que lo prueba",
+      "gap": "string, que falta (vacio si esta cubierto)"
+    }
+  ],
+  "missingScenarios": ["string"],
+  "extraBehaviors": ["string"],
+  "verdict": "string, una o dos frases con la conclusion"
+}`;
+}
+
+/**
+ * Paso 6: destilar la sesion en conocimiento reutilizable.
+ *
+ * Se le manda lo que YA sabe la base para que no vuelva a proponerlo: el valor
+ * esta en lo que es nuevo, no en reescribir las convenciones que ya estan escritas.
+ */
+export function distillPrompt(session: SessionLog, knowledge: KnowledgeBase): string {
+    const existingRules = knowledge.rules
+        .map((rule) => `- [${rule.scope}/${rule.category}] ${rule.rule}`)
+        .join("\n");
+    const existingFacts = knowledge.facts
+        .map((fact) => `- (${fact.area}) ${fact.question} -> ${fact.answer}`)
+        .join("\n");
+    const existingRecipes = knowledge.recipes
+        .map((recipe) => `- [${recipe.scope}] ${recipe.problem}`)
+        .join("\n");
+
+    return `TAREA: ${TASK.distill}
+
+Eres el responsable de la memoria a largo plazo de un agente que genera tests de Playwright.
+Tu trabajo es convertir lo que paso en ESTA sesion en conocimiento que haga que la PROXIMA
+sesion necesite menos intentos, menos preguntas y menos tokens.
+
+LO QUE PASO EN ESTA SESION:
+${json(session)}
+
+LO QUE LA BASE DE CONOCIMIENTO YA SABE (NO lo repitas, NO lo reformules):
+${existingRules ? `REGLAS:\n${existingRules}` : "REGLAS: (ninguna todavia)"}
+
+${existingRecipes ? `RECETAS:\n${existingRecipes}` : "RECETAS: (ninguna todavia)"}
+
+${existingFacts ? `HECHOS:\n${existingFacts}` : "HECHOS: (ninguno todavia)"}
+
+QUE EXTRAER
+
+1. "rules" - lecciones normativas. Solo de:
+   - un error real que hubo que reparar (mira "repairs": compara codeBefore con codeAfter y
+     deduce la regla que habria evitado ese error desde el principio);
+   - una correccion o comentario del humano (mira "humanInput" tipo feedback);
+   - un escenario que el codigo no cubrio (mira "coverageGaps").
+   Escribelas en imperativo y autocontenidas: quien las lea sin ver esta sesion debe poder
+   aplicarlas. Incluye el "trigger": el sintoma que permite reconocer cuando aplican.
+   "scope" es "api" si solo aplica a tests de servicio, "ui" si solo a tests de navegador,
+   "both" si aplica a los dos.
+
+2. "recipes" - soluciones de codigo que YA funcionaron (el codeAfter de una reparacion exitosa).
+   Solo si el problema es recurrente y la solucion es reutilizable tal cual. El "code" debe ser
+   un fragmento completo y compilable, no un esbozo. Maximo 2 por sesion.
+
+3. "facts" - datos del dominio o del ambiente que el agente NO puede deducir del codigo y que
+   un humano tuvo que aportar: URLs, rutas de PDFs, textos exactos, usuarios de prueba,
+   nombres de sucursales, mensajes de error del negocio, decisiones de producto.
+   Salen casi siempre de "humanInput" tipo answer. Guarda la pregunta que responden para
+   poder reusarlos. NUNCA guardes contrasenas, tokens ni secretos: si la respuesta del humano
+   contiene uno, omite ese hecho por completo.
+
+4. "violatedRules" - ids de reglas que ya estaban en la base y que el codigo de esta sesion
+   incumplio (se ve porque hubo que repararlo por ese motivo). Sirve para detectar reglas
+   que estan mal redactadas y no se estan respetando.
+
+REGLAS DE ORO
+
+- Calidad sobre cantidad: 2 reglas accionables valen mas que 10 genericas. Array vacio es una
+  respuesta valida y correcta si la sesion no ensena nada nuevo.
+- PROHIBIDO extraer lo que ya esta en las convenciones del framework ("usa test.step",
+  "usa getByRole", "importa desde el fixture", "no uses waitForTimeout"). Eso ya se le dice
+  al modelo en cada prompt; repetirlo solo gasta tokens.
+- PROHIBIDO describir sintomas sin decir que hacer. Mal: "fallo el locator del footer".
+  Bien: "El footer carga en diferido: hazle scrollIntoViewIfNeeded antes de resolver locators
+  internos, o el locator existira pero no sera visible".
+- Nada de metricas ni de "se generaron N tests": eso se calcula solo.
+- Si un hecho o regla contradice algo que ya esta en la base, no lo dupliques: reportalo en
+  "notes" para que un humano lo revise.
+
+Responde UNICAMENTE con un objeto JSON:
+{
+  "rules": [
+    {
+      "scope": "ui",
+      "category": "locator",
+      "rule": "instruccion en imperativo, autocontenida",
+      "trigger": "sintoma observable que indica que aplica"
+    }
+  ],
+  "recipes": [
+    {
+      "scope": "ui",
+      "problem": "el problema recurrente que resuelve",
+      "code": "codigo completo y compilable",
+      "placement": "src/pages"
+    }
+  ],
+  "facts": [
+    {
+      "question": "la pregunta que este dato responde",
+      "answer": "el dato concreto",
+      "area": "footer"
+    }
+  ],
+  "violatedRules": ["R-003"],
+  "notes": "una o dos frases; vacio si no hay nada que reportar"
+}`;
 }
