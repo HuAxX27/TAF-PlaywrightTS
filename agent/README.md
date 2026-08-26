@@ -1,124 +1,127 @@
-# Agente AQA: Xray a Playwright
+# Toolkit AQA para Claude Code: Xray a Playwright
 
-El agente convierte **Test Cases existentes de Xray Cloud** en candidates de
-Playwright. No diseña pruebas desde User Stories: Xray es la fuente de verdad de
-requisitos, pasos y resultados esperados.
+El agente AQA usa ahora la arquitectura nativa de Claude Code: slash commands basados en
+skills, subagentes especializados, un orquestador batch y un CLI TypeScript sin razonamiento
+generativo. Xray continúa siendo la fuente de verdad y las puertas de Playwright siguen siendo
+deterministas.
 
-## Flujo de calidad
-
-```text
-Xray Test / Test Plan / JQL
-  -> normalización + clasificación UI/API
-  -> plan de automatización auditable
-  -> inventario de cobertura + exploración de la aplicación
-  -> candidate de código
-  -> Playwright --list + TypeScript + ESLint + E2E + revisor
-  -> revisión humana y promoción a la suite aprobada
-```
-
-Un candidate se escribe en `tests/candidates/` y queda excluido de `npm test`.
-El agente lo habilita únicamente para validarlo. Nunca debe confundirse un
-archivo con `TODO`, `test.fixme` o una validación fallida con una prueba aprobada.
-
-## Configuración
+## Inicio rápido
 
 ```bash
 npm ci
 npx playwright install --with-deps
 cp .env.example .env
+claude
 ```
 
-Configura `BASE_URL`, `XRAY_CLIENT_ID`, `XRAY_CLIENT_SECRET`, `CODEMIE_API_KEY`
-y el identificador corporativo de Sonnet:
+Dentro de Claude Code:
 
-```dotenv
-LLM_PROVIDER=codemie
-LLM_MODEL=<id-de-sonnet-4.5-en-codemie>
-LLM_TEMPERATURE=0.1
+```text
+/aqa-generate PROJ-123
+/aqa-generate keys:PROJ-123,PROJ-124
+/aqa-generate plan:PROJ-PLAN-7
+/aqa-generate "jql:project = CINE AND labels = regression" --dry-run
+/aqa-candidates
+/aqa-repair tests/candidates/ui/account/PROJ-123-profile.spec.ts
+/aqa-promote all
 ```
 
-## Uso
+Abre `claude` normalmente y usa los slash commands. El modo batch se solicita con
+`/aqa-generate <selector> --yes`, que delega al `aqa-orchestrator`.
 
-El flujo recomendado no necesita parámetros:
+## Arquitectura
+
+```text
+/aqa-generate (sesión principal interactiva)
+  -> aqa-orchestrator solo con --yes (Opus)
+     -> clarifier (Sonnet)
+     -> classifier (Haiku)
+     -> coverage analyst (Sonnet)
+     -> planner (Sonnet)
+     -> codegen -> UI / API engineer (Sonnet)
+     -> gates deterministas
+     -> repair analyst + codegen proposal + adversarial validator, si falla
+     -> final validator (Opus)
+     -> learning distiller (Sonnet)
+```
+
+- **Opus** se reserva para orquestación batch y validación final.
+- **Sonnet** implementa y realiza análisis semántico que necesita contexto de código.
+- **Haiku** ejecuta clasificación mecánica, status y gates reproducibles.
+
+Cada agente declara modelo, esfuerzo, herramientas, skills y máximo de turnos en
+`.claude/agents/`. Los orquestadores pueden anidar especialistas hasta tres niveles y hay un
+límite de seis subagentes concurrentes.
+
+## Slash commands / skills
+
+Claude Code unificó los custom slash commands con skills. Por eso los comandos del proyecto
+viven en `.claude/skills/<command>/SKILL.md` y se invocan con `/command`:
+
+| Comando                | Acción                                                       |
+| ---------------------- | ------------------------------------------------------------ |
+| `/aqa-generate`        | Flujo principal desde Xray, con revisión y aprobación humana |
+| `/aqa-repair`          | Diagnóstico y reparación con verificación independiente      |
+| `/aqa-candidates`      | Estado y causa de bloqueo de candidates                      |
+| `/aqa-promote`         | Promoción transaccional, siempre con confirmación            |
+| `/aqa-learning-report` | Muestra conocimiento y métricas                              |
+| `/aqa-help`            | Explica arquitectura y ejemplos                              |
+
+Los skills internos `aqa-conventions`, `aqa-knowledge` y `aqa-artifact-contract` se precargan
+solo donde hacen falta para no inflar el contexto principal.
+
+## CLI determinista
+
+`agent/toolkit-cli.ts` no llama modelos. Lo usan los agentes para operaciones que deben ser
+reproducibles:
 
 ```bash
-npm run agent
+npm run aqa:toolkit -- prepare --selector=PROJ-123
+npm run aqa:toolkit -- inventory
+npm run aqa:toolkit -- explore --start-path=/login --triggers=login
+npm run aqa:toolkit -- validate --spec=tests/candidates/ui/account/PROJ-123.spec.ts --run-dir=agent/artifacts/<run-id> --e2e
+npm run aqa:toolkit -- status
+npm run aqa:toolkit -- promote --all --confirm
 ```
 
-El asistente muestra estas opciones:
+El helper de promoción valida todo el lote antes de mover un archivo, corrige imports relativos,
+revalida después de mover y revierte la operación si algún candidate falla.
 
-1. Generar pruebas desde Xray.
-2. Ver el estado de los candidates.
-3. Promover candidates listos.
+## Flujo de calidad y humano en el ciclo
 
-Para consultar el estado en cualquier momento:
-
-```bash
-npm run candidates
+```text
+Xray -> aclaraciones -> aprobación de TCs/planes -> candidate
+     -> TypeScript + ESLint + Playwright --list + E2E
+     -> auditoría escenario Xray vs código -> aprobación del diff
+     -> ready_for_review -> /aqa-promote
 ```
 
-Para promover uno, varios, un rango o todos los candidates listos:
-
-```bash
-npm run promote
-```
-
-La promoción sólo ofrece candidates con validación E2E aprobada y cobertura
-completa. Corrige automáticamente el import relativo al mover el spec, vuelve a
-validarlo y revierte el lote completo si alguno falla. Cada promoción deja una
-auditoría en `agent/artifacts/promotions/`.
-
-### Uso avanzado
-
-Los parámetros continúan disponibles para CI o usuarios experimentados:
-
-```bash
-# Un Test Case
-npm run agent -- PROJ-123 --provider=codemie
-
-# Varios Tests concretos
-npm run agent -- --keys=PROJ-123,PROJ-124 --provider=codemie --yes
-
-# Todos los Tests de un Test Plan (máximo 100 por llamada Xray)
-npm run agent -- --test-plan=PROJ-PLAN-7 --provider=codemie
-
-# Lote definido por JQL
-npm run agent -- --jql="project = PROJ AND labels = regression" --provider=codemie
-```
-
-Usa `--dry-run` para obtener clasificación, plan e inventario sin escribir
-candidates. `--include-partial` incluye casos que la cobertura marque como
-parcial. `--yes` desactiva preguntas interactivas para CI.
+Los subagentes no inventan decisiones del QA. Cuando requieren información o aprobación devuelven
+`NEEDS_INPUT` / `NEEDS_APPROVAL`; el hilo principal pregunta y reanuda el mismo orquestador.
 
 ## Artefactos
 
-Cada ejecución deja una carpeta en `agent/artifacts/<run-id>/`:
+Cada corrida crea `agent/artifacts/<run-id>/` con el contrato histórico completo:
 
-- `00-run.json`: selector Xray, modelo y configuración de la corrida.
-- `02-test-cases.*`: Test Cases importados de Xray.
-- `02b-kind-decisions.json`: clasificación UI/API.
-- `03-inventory.json`: pruebas existentes detectadas.
-- `04-coverage.*`: trazabilidad contra cobertura actual.
-- `05-automation-plans.json`: plan antes de generar código.
-- `05-report.md`: resumen de la corrida.
-- `06-final-validation.*`: cobertura del TC contra el candidate generado.
-- `07-human-review.json`: decisiones y excepciones humanas.
-- `08-candidate-manifest.json`: estado de cada candidate para revisión o reintento.
+- `00-run.json`: selector, fecha, engine y rutas.
+- `01-workspace-snapshot.json`: hashes previos para probar qué archivos cambió codegen.
+- `02-test-cases.*`: TCs Xray vigentes tras aclaraciones.
+- `02b-kind-decisions.json`: UI/API, confianza y evidencia.
+- `03-inventory.json`: pruebas existentes.
+- `04-coverage.*`: trazabilidad de cobertura.
+- `05-automation-plans.json`: plan previo al código.
+- `05-generated.json` y `05-report.md`: candidates y resumen.
+- `06-final-validation.*`: escenario Xray contra evidencia en código.
+- `07-human-review.json`: preguntas, respuestas, feedback y aprobaciones.
+- `08-candidate-manifest.json`: estado consumido por promoción.
+- `09-learning-input.json`: evidencia redactada antes de entrar al modelo de aprendizaje.
 
-## Reglas operativas
+## Seguridad
 
-- Xray es la única entrada productiva.
-- Un lote debe agruparse por módulo y revisarse por candidate, no aprobarse a
-  ciegas con `--yes`.
-- El modelo no puede generar locators sin evidencia de exploración real.
-- La promoción a `tests/ui` o `tests/api` exige validación E2E y revisión del
-  diff por un AQA.
-- Los datos de ambiente, usuarios y decisiones de negocio confirmadas se
-  registran como conocimiento; nunca se guardan secretos.
-
-## Límites conscientes
-
-Un LLM no garantiza que una prueba sea correcta solo porque compile. Por eso el
-agente usa evidencia, puertas deterministas, ejecución real y revisión humana.
-La métrica clave es el porcentaje de candidates promovidos sin corrección, no el
-número de archivos generados.
+- `.claude/settings.json` bloquea lectura de `.env` y sesiones de autenticación, y nunca permite
+  `git push` desde el toolkit.
+- El acceso a Xray ocurre dentro del helper; sus credenciales no entran al contexto del modelo.
+- El agente UI usa la skill de exploración Playwright determinista; no carga un MCP de navegador
+  global ni expone sus esquemas al resto de agentes.
+- Un candidate con placeholders, E2E rojo o cobertura incompleta nunca es promovible.
+- La promoción requiere `--confirm` además del consentimiento en conversación.

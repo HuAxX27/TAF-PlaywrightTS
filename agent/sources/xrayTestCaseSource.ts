@@ -1,7 +1,7 @@
 import type { TestCase, TestPriority } from "../types";
 import type { TestCaseSource } from "./testCaseSource";
 
-export interface XrayOptions {
+interface XrayOptions {
     baseUrl: string;
     clientId: string;
     clientSecret: string;

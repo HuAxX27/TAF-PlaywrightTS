@@ -3,7 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { agentConfig } from "../config";
 import type { ExistingTest } from "../types";
-import { run } from "./shell";
+import { runTool } from "./shell";
 
 interface PlaywrightListSpec {
     title: string;
@@ -23,7 +23,7 @@ interface PlaywrightListReport {
     suites?: PlaywrightListSuite[];
 }
 
-export interface Inventory {
+interface Inventory {
     tests: ExistingTest[];
     source: "playwright" | "regex";
     /** Motivo por el que se cayo al fallback, si aplica. */
@@ -58,10 +58,14 @@ function listWithPlaywright(): { tests: ExistingTest[] | null; reason?: string }
     // impriman dotenv, npx o un plugin del config corrompa el parseo.
     const outputFile = path.join(os.tmpdir(), `pw-list-${process.pid}-${Date.now()}.json`);
 
-    const result = run("npx playwright test --list --pass-with-no-tests --reporter=json", {
-        cwd: agentConfig.root,
-        env: { PLAYWRIGHT_JSON_OUTPUT_NAME: outputFile },
-    });
+    const result = runTool(
+        "playwright",
+        ["test", "--list", "--pass-with-no-tests", "--reporter=json"],
+        {
+            cwd: agentConfig.root,
+            env: { PLAYWRIGHT_JSON_OUTPUT_NAME: outputFile },
+        }
+    );
 
     let raw: string | null = null;
 
@@ -141,7 +145,7 @@ function parseListReport(report: PlaywrightListReport): ExistingTest[] {
 }
 
 /** Plan C: leer los .spec.ts y sacar titulos y tags a mano. */
-export function scanSpecFiles(dir: string): ExistingTest[] {
+function scanSpecFiles(dir: string): ExistingTest[] {
     const tests: ExistingTest[] = [];
     if (!fs.existsSync(dir)) return tests;
 

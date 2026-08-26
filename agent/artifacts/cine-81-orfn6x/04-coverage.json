@@ -1,8 +1,0 @@
-[
-  {
-    "testCaseId": "CINE-81",
-    "status": "missing",
-    "matchedTests": [],
-    "rationale": "No existe ninguna prueba en el framework que valide el enlace 'Términos y condiciones generales' en el footer, su atributo target='_blank', ni que verifique que abre un PDF en nueva pestaña."
-  }
-]

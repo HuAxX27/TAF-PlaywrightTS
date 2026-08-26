@@ -1,8 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import dotenv from "dotenv";
 import { env } from "./src/config/env";
-
-dotenv.config();
 
 const IGNORE_CANDIDATES = /.*[\\/]candidates[\\/].*\.spec\.ts/;
 const includeCandidates = process.env.AQA_INCLUDE_CANDIDATES === "true";

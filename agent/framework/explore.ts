@@ -1,7 +1,7 @@
 import { chromium } from "@playwright/test";
 import { agentConfig } from "../config";
 
-export interface PageExploration {
+interface PageExploration {
     /** URL final tras cualquier redireccion o click de trigger. */
     url: string;
     title: string;
@@ -19,7 +19,7 @@ export interface PageExploration {
  * matchee (ej. "Iniciar sesion" para revelar un formulario de login que no
  * vive en la home), y captura el snapshot DESPUES de esa accion.
  *
- * Le da al LLM los locators y textos REALES del sitio en vez de que los
+ * Le da al agente los locators y textos REALES del sitio en vez de que los
  * adivine, que es la causa principal de los TODO en el codigo generado.
  */
 export async function explorePage(

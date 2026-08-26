@@ -1,25 +1,14 @@
 import * as path from "path";
 import * as fs from "fs";
 import { agentConfig } from "../config";
-import { run } from "./shell";
+import { runTool } from "./shell";
 
-export interface FileValidation {
+interface FileValidation {
     ok: boolean;
     errors: string[];
 }
 
-/**
- * Puerta de calidad sobre el codigo generado.
- *
- * Sin esto el agente solo "escribe archivos": nada garantiza que compilen ni que
- * Playwright los reconozca. Los errores que devuelve se le regresan al modelo
- * para que repare, que es lo que convierte la generacion en algo utilizable.
- */
-export function validateGeneratedFile(filePath: string): FileValidation {
-    return validateGeneratedFiles(filePath, []);
-}
-
-/** Igual que `validateGeneratedFile`, pero tambien valida los archivos de soporte tocados. */
+/** Puerta determinista sobre el spec y todos los archivos de soporte tocados. */
 export function validateGeneratedFiles(specPath: string, supportPaths: string[]): FileValidation {
     const specRel = toRelative(specPath);
     const supportRels = supportPaths.map(toRelative);
@@ -27,7 +16,7 @@ export function validateGeneratedFiles(specPath: string, supportPaths: string[])
     const errors: string[] = [];
 
     // Un candidate con placeholders puede compilar y hasta pasar, pero no es un
-    // test automatizado utilizable. Esta puerta es determinista, no LLM.
+    // test automatizado utilizable. Esta puerta es determinista, no generativa.
     for (const filePath of [specPath, ...supportPaths]) {
         const content = fs.readFileSync(filePath, "utf-8");
         if (/\bTODO\b|\bPENDIENTE\b|test\.fixme\s*\(|waitForTimeout\s*\(/i.test(content)) {
@@ -38,7 +27,7 @@ export function validateGeneratedFiles(specPath: string, supportPaths: string[])
     }
 
     // 1. Playwright puede cargar el spec y ve al menos una prueba.
-    const list = run(`npx playwright test --list "${specRel}" --reporter=list`, {
+    const list = runTool("playwright", ["test", "--list", specRel, "--reporter=list"], {
         cwd: agentConfig.root,
         env: { AQA_INCLUDE_CANDIDATES: "true" },
     });
@@ -50,7 +39,7 @@ export function validateGeneratedFiles(specPath: string, supportPaths: string[])
 
     // 2. Compila en modo strict (afecta a todo el proyecto: si un Page Object nuevo
     // rompe otro spec existente, se detecta aqui).
-    const typecheck = run("npx tsc --noEmit", { cwd: agentConfig.root });
+    const typecheck = runTool("typescript", ["--noEmit"], { cwd: agentConfig.root });
     if (typecheck.code !== 0) {
         const output = `${typecheck.stdout}\n${typecheck.stderr}`;
         const own = output
@@ -62,9 +51,7 @@ export function validateGeneratedFiles(specPath: string, supportPaths: string[])
     }
 
     // 3. Lint: no bloquea si el linter mismo no puede correr.
-    const lint = run(`npx eslint ${allRels.map((rel) => `"${rel}"`).join(" ")}`, {
-        cwd: agentConfig.root,
-    });
+    const lint = runTool("eslint", allRels, { cwd: agentConfig.root });
     if (lint.code !== 0) {
         errors.push(...meaningfulLines(`${lint.stdout}\n${lint.stderr}`).slice(0, 15));
     }

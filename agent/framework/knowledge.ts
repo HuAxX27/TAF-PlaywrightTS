@@ -7,7 +7,6 @@ import type {
     KnowledgeRecipe,
     KnowledgeRule,
     KnowledgeScope,
-    SessionLearningSummary,
     TestKind,
 } from "../types";
 
@@ -27,10 +26,6 @@ const CURRENT_VERSION = "2.0.0";
 
 /** Historial de sesiones que se conserva: suficiente para auditar, sin inflar el archivo. */
 const MAX_HISTORY = 30;
-
-export function knowledgeFilePath(): string {
-    return KNOWLEDGE_FILE;
-}
 
 export function loadKnowledge(): KnowledgeBase {
     if (!fs.existsSync(KNOWLEDGE_FILE)) {
@@ -145,66 +140,6 @@ export function knowledgeForPrompt(kind: TestKind): string {
     return truncate(sections.join("\n"), budget);
 }
 
-/** Hechos del dominio ya conocidos, para el area de un test case. */
-export function factsForPrompt(areas: string[]): string {
-    const knowledge = loadKnowledge();
-    if (knowledge.facts.length === 0) return "";
-
-    const wanted = new Set(areas.map((area) => area.toLowerCase()));
-    const relevant = knowledge.facts.filter(
-        (fact) => wanted.size === 0 || wanted.has(fact.area.toLowerCase())
-    );
-    const facts = (relevant.length > 0 ? relevant : knowledge.facts).slice(
-        0,
-        agentConfig.maxFactsInPrompt
-    );
-
-    if (facts.length === 0) return "";
-
-    return truncate(
-        [
-            "DATOS DEL DOMINIO YA CONFIRMADOS POR EL QA (son fuente de verdad, usalos tal cual",
-            "y NO vuelvas a preguntar por ellos):",
-            ...facts.map((fact) => `- ${fact.question} -> ${fact.answer}`),
-        ].join("\n"),
-        agentConfig.knowledgeContextChars
-    );
-}
-
-/**
- * Busca si una duda ya fue respondida en una sesion anterior.
- *
- * Es el ahorro mas directo del sistema: no volver a molestar al humano ni a gastar
- * tokens por algo que ya se contesto.
- */
-export function findKnownAnswer(question: string): KnowledgeFact | undefined {
-    const knowledge = loadKnowledge();
-    const wanted = keywords(question);
-    if (wanted.length === 0) return undefined;
-
-    let best: { fact: KnowledgeFact; overlap: number } | undefined;
-
-    for (const fact of knowledge.facts) {
-        const have = keywords(fact.question);
-        const shared = wanted.filter((word) => have.includes(word)).length;
-        // Se exige solapamiento alto en ambos sentidos: un match flojo daria una
-        // respuesta equivocada, que es peor que preguntar de nuevo.
-        const ratio = shared / Math.max(wanted.length, have.length);
-        if (shared >= 3 && ratio >= 0.6 && (!best || shared > best.overlap)) {
-            best = { fact, overlap: shared };
-        }
-    }
-
-    return best?.fact;
-}
-
-export function recordAvoidedQuestions(count: number): void {
-    if (count <= 0) return;
-    const knowledge = loadKnowledge();
-    knowledge.stats.questionsAvoidedByFacts += count;
-    saveKnowledge(knowledge);
-}
-
 function applicable<T extends { scope: KnowledgeScope }>(items: T[], kind: TestKind): T[] {
     return items.filter((item) => item.scope === "both" || item.scope === kind);
 }
@@ -269,9 +204,15 @@ export interface DistilledKnowledge {
     facts: Array<Pick<KnowledgeFact, "question" | "answer" | "area">>;
     violatedRules: string[];
     notes: string;
+    session?: {
+        specsGenerated: number;
+        specsPassedFirstTry: number;
+        repairAttempts: number;
+        questionsAvoided: number;
+    };
 }
 
-export interface MergeOutcome {
+interface MergeOutcome {
     newRules: number;
     newRecipes: number;
     newFacts: number;
@@ -296,7 +237,7 @@ export function mergeDistilled(
         confirmedRules: 0,
     };
 
-    for (const incoming of distilled.rules) {
+    for (const incoming of distilled.rules.slice(0, agentConfig.maxNewRulesPerSession)) {
         const existing = knowledge.rules.find(
             (rule) => rule.scope === incoming.scope && similar(rule.rule, incoming.rule)
         );
@@ -358,7 +299,7 @@ export function mergeDistilled(
         outcome.newRecipes++;
     }
 
-    for (const incoming of distilled.facts) {
+    for (const incoming of distilled.facts.slice(0, agentConfig.maxNewFactsPerSession)) {
         const existing = knowledge.facts.find((fact) => similar(fact.question, incoming.question));
 
         if (existing) {
@@ -366,10 +307,10 @@ export function mergeDistilled(
                 existing.sessions.push(sessionKey);
             }
             existing.lastSeen = now;
-            // Un hecho aportado por un humano no se sobreescribe con una inferencia.
-            if (existing.source !== "human") {
-                existing.answer = incoming.answer;
-            }
+            // La destilación solo admite hechos confirmados por el humano; la respuesta más
+            // reciente corrige conocimiento obsoleto sin crear un duplicado.
+            existing.answer = incoming.answer;
+            existing.area = incoming.area || existing.area;
             continue;
         }
 
@@ -391,7 +332,53 @@ export function mergeDistilled(
         if (rule) rule.violationsAfterLearning++;
     }
 
+    recordSession(knowledge, distilled, sessionKey, outcome, now);
+
     return outcome;
+}
+
+function recordSession(
+    knowledge: KnowledgeBase,
+    distilled: DistilledKnowledge,
+    sessionKey: string,
+    outcome: MergeOutcome,
+    now: string
+): void {
+    if (knowledge.history.some((entry) => entry.sessionKey === sessionKey)) return;
+
+    const specsGenerated = safeCount(distilled.session?.specsGenerated);
+    const specsPassedFirstTry = Math.min(
+        specsGenerated,
+        safeCount(distilled.session?.specsPassedFirstTry)
+    );
+    const repairAttempts = safeCount(distilled.session?.repairAttempts);
+    const stats = knowledge.stats;
+    stats.sessions++;
+    stats.specsGenerated += specsGenerated;
+    stats.specsPassedFirstTry += specsPassedFirstTry;
+    stats.totalRepairAttempts += repairAttempts;
+    stats.questionsAvoidedByFacts += safeCount(distilled.session?.questionsAvoided);
+    stats.averageRepairAttempts =
+        stats.specsGenerated > 0
+            ? Number((stats.totalRepairAttempts / stats.specsGenerated).toFixed(2))
+            : 0;
+
+    knowledge.history.push({
+        sessionKey,
+        date: now,
+        specsGenerated,
+        specsPassedFirstTry,
+        newRules: outcome.newRules,
+        newRecipes: outcome.newRecipes,
+        newFacts: outcome.newFacts,
+        confirmedRules: outcome.confirmedRules,
+        violatedRules: distilled.violatedRules,
+        notes: distilled.notes,
+    });
+}
+
+function safeCount(value: number | undefined): number {
+    return Number.isFinite(value) && value !== undefined ? Math.max(0, Math.floor(value)) : 0;
 }
 
 /** Dos textos dicen lo mismo si comparten la mayoria de sus palabras significativas. */
@@ -411,27 +398,6 @@ function nextId(items: Array<{ id: string }>, prefix: string): string {
     }, 0);
 
     return `${prefix}-${String(max + 1).padStart(3, "0")}`;
-}
-
-// ---------------------------------------------------------------------------
-// Estadisticas
-// ---------------------------------------------------------------------------
-
-export function updateStats(
-    knowledge: KnowledgeBase,
-    specsGenerated: number,
-    specsPassedFirstTry: number,
-    repairAttempts: number
-): void {
-    const stats = knowledge.stats;
-    stats.sessions++;
-    stats.specsGenerated += specsGenerated;
-    stats.specsPassedFirstTry += specsPassedFirstTry;
-    stats.totalRepairAttempts += repairAttempts;
-    stats.averageRepairAttempts =
-        stats.specsGenerated > 0
-            ? Number((stats.totalRepairAttempts / stats.specsGenerated).toFixed(2))
-            : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +494,7 @@ export function renderKnowledgeMarkdown(knowledge: KnowledgeBase): string {
         lines.push("| Area | Pregunta que responde | Dato | Origen |", "| --- | --- | --- | --- |");
         for (const fact of [...knowledge.facts].sort((a, b) => a.area.localeCompare(b.area))) {
             lines.push(
-                `| ${cell(fact.area)} | ${cell(fact.question)} | ${cell(fact.answer)} | ${fact.source === "human" ? "QA" : "inferido"} |`
+                `| ${cell(fact.area)} | ${cell(fact.question)} | ${cell(fact.answer)} | QA |`
             );
         }
         lines.push("");
@@ -581,25 +547,4 @@ const ORIGIN_LABEL: Record<KnowledgeRule["origin"], string> = {
 
 function cell(text: string): string {
     return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim() || "-";
-}
-
-/** Resumen corto para imprimir al cerrar la corrida. */
-export function describeSessionLearning(summary: SessionLearningSummary): string[] {
-    const lines = [
-        `aprendizaje: ${summary.newRules} regla(s) nueva(s), ${summary.newRecipes} receta(s), ${summary.newFacts} hecho(s)`,
-    ];
-
-    if (summary.confirmedRules > 0) {
-        lines.push(`${summary.confirmedRules} regla(s) ya conocida(s) reconfirmada(s)`);
-    }
-    if (summary.violatedRules.length > 0) {
-        lines.push(
-            `! ${summary.violatedRules.length} regla(s) aprendida(s) fueron incumplidas: ${summary.violatedRules.join(", ")}`
-        );
-    }
-    if (summary.notes) {
-        lines.push(`nota: ${summary.notes}`);
-    }
-
-    return lines;
 }

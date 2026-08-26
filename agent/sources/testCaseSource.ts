@@ -1,9 +1,8 @@
 import type { TestCase } from "../types";
 
 /**
- * De donde salen Test Cases YA definidos (Xray, o un archivo local para demos).
- * Aqui no se diseña nada: el Test Case de Xray ya viene completo
- * y el pipeline salta directo a cobertura + generacion de codigo.
+ * Contrato de la única entrada funcional: Test Cases ya definidos en Xray.
+ * Aquí no se diseñan requisitos; la fuente entrega el TC normalizado.
  */
 export interface TestCaseSource {
     readonly name: string;

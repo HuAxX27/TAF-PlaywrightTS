@@ -1,7 +1,0 @@
-{
-  "selector": "CINE-81",
-  "startedAt": "2026-08-24T21:30:04.228Z",
-  "provider": "codemie",
-  "model": "claude-4-5-sonnet",
-  "candidatesDir": "tests/candidates"
-}

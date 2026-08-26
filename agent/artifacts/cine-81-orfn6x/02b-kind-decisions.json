@@ -1,9 +1,0 @@
-[
-  {
-    "testCaseId": "CINE-81",
-    "kind": "ui",
-    "confidence": 80,
-    "rationale": "Vocabulario de interfaz dominante (8 senales de UI vs 0 de API).",
-    "decidedBy": "heuristic"
-  }
-]

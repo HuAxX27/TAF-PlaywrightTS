@@ -18,7 +18,7 @@ interface ContextFile {
 }
 
 /**
- * Arma el contexto que el LLM necesita para escribir codigo que ENCAJE en este
+ * Arma el contexto que el agente necesita para escribir código que ENCAJE en este
  * repositorio en vez de codigo Playwright generico.
  *
  * `kind` decide que capas del framework se mandan: un test de API no necesita
@@ -28,7 +28,7 @@ export function buildFrameworkContext(kind: TestKind = "ui"): string {
     const files: ContextFile[] = [];
 
     // 1. Convenciones del framework (reemplazan el spec de ejemplo)
-    const conventions = loadConventions();
+    const conventions = `${loadConventions()}\n\n${loadKindConventions(kind)}`;
 
     // 2. Fixtures disponibles
     push(files, "FIXTURES DISPONIBLES", agentConfig.fixturesPath);
@@ -65,7 +65,7 @@ export function buildFrameworkContext(kind: TestKind = "ui"): string {
 }
 
 /** Convenciones especificas del tipo de test, para el prompt de codegen. */
-export function loadKindConventions(kind: TestKind): string {
+function loadKindConventions(kind: TestKind): string {
     const file = KIND_CONVENTIONS_FILE[kind];
     if (fs.existsSync(file)) {
         return fs.readFileSync(file, "utf-8");

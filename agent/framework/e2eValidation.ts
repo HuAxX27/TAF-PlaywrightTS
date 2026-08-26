@@ -1,18 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { agentConfig } from "../config";
-import { run } from "./shell";
+import { runTool } from "./shell";
 
-export interface E2EValidationResult {
-    ok: boolean;
-    attempts: number;
-    testOutput: string;
-    errors: TestError[];
-    screenshots: string[];
-    traces: string[];
-}
-
-export interface TestError {
+interface TestError {
     type: "timeout" | "assertion" | "locator" | "navigation" | "other";
     message: string;
     stack?: string;
@@ -23,7 +14,7 @@ export interface TestError {
     };
 }
 
-export interface TestExecutionOutput {
+interface TestExecutionOutput {
     passed: boolean;
     duration: number;
     errors: TestError[];
@@ -39,12 +30,12 @@ export interface TestExecutionOutput {
  */
 export function executeTest(specPath: string, testName?: string): TestExecutionOutput {
     const specRel = toRelative(specPath);
-    const testFilter = testName ? ` -g "${testName}"` : "";
+    const args = ["test", specRel];
+    if (testName) args.push("-g", testName);
+    args.push("--project=chromium", "--reporter=json", "--output=test-results");
 
-    // Un solo navegador durante la reparacion: el objetivo es diagnosticar, no dar cobertura.
-    const command = `npx playwright test "${specRel}"${testFilter} --project=chromium --reporter=json --output=test-results`;
-
-    const result = run(command, {
+    // Un solo navegador durante la reparación: el objetivo es diagnosticar, no dar cobertura.
+    const result = runTool("playwright", args, {
         cwd: agentConfig.root,
         timeoutMs: 180_000,
         env: {
@@ -56,8 +47,23 @@ export function executeTest(specPath: string, testName?: string): TestExecutionO
 
     const jsonOutput = extractJsonReport(result.stdout);
     const errors = parseTestErrors(`${result.stderr}\n${result.stdout}`, jsonOutput);
-    const screenshots = findArtifacts(specRel, "png");
-    const traces = findArtifacts(specRel, "zip");
+    const screenshots = unique([
+        ...reportedArtifacts(jsonOutput, (attachment) =>
+            Boolean(
+                attachment.path &&
+                (attachment.contentType?.startsWith("image/") || attachment.path.endsWith(".png"))
+            )
+        ),
+        ...findArtifacts(specRel, "png"),
+    ]);
+    const traces = unique([
+        ...reportedArtifacts(jsonOutput, (attachment) =>
+            Boolean(
+                attachment.path && (attachment.name === "trace" || attachment.path.endsWith(".zip"))
+            )
+        ),
+        ...findArtifacts(specRel, "zip"),
+    ]);
 
     // Sin errores parseados pero con exit code != 0 no se puede diagnosticar nada:
     // se conserva la salida cruda como error para que el analizador tenga material.
@@ -68,75 +74,14 @@ export function executeTest(specPath: string, testName?: string): TestExecutionO
         });
     }
 
-    // Detectar errores que requieren acción humana
-    const requiresHumanAction = errors.some(
-        (err) =>
-            err.message.includes("PENDIENTE") ||
-            err.message.includes("<PENDIENTE") ||
-            err.message.includes("Q-0") ||
-            err.message.includes("TODO") ||
-            err.message.includes("FIXME")
-    );
-
-    if (requiresHumanAction && errors.length > 0) {
-        console.log(
-            "\n       ⚠️  ERROR: El test requiere acción humana (URL pendiente, datos faltantes, etc.)"
-        );
-        console.log("       El test NO puede repararse automáticamente.");
-        console.log("       Por favor, revisa el spec y completa la información faltante.\n");
-    }
-
     return {
         passed: result.code === 0,
-        duration: jsonOutput?.duration ?? 0,
+        duration: jsonOutput?.duration ?? jsonOutput?.stats?.duration ?? 0,
         errors,
         stdout: result.stdout,
         stderr: result.stderr,
         screenshots,
         traces,
-    };
-}
-
-/**
- * Ejecuta el test múltiples veces hasta que pase o se agoten los intentos.
- * Devuelve el resultado de la última ejecución.
- */
-export function executeTestWithRetries(
-    specPath: string,
-    maxAttempts: number = 3,
-    testName?: string
-): E2EValidationResult {
-    let lastResult: TestExecutionOutput | null = null;
-    let attempts = 0;
-
-    while (attempts < maxAttempts) {
-        attempts++;
-        console.log(`       ejecutando test (intento ${attempts}/${maxAttempts})...`);
-
-        lastResult = executeTest(specPath, testName);
-
-        if (lastResult.passed) {
-            console.log(`       ✓ test pasó en intento ${attempts}`);
-            return {
-                ok: true,
-                attempts,
-                testOutput: lastResult.stdout,
-                errors: [],
-                screenshots: lastResult.screenshots,
-                traces: lastResult.traces,
-            };
-        }
-
-        console.log(`       ✗ test falló: ${lastResult.errors.length} error(es)`);
-    }
-
-    return {
-        ok: false,
-        attempts,
-        testOutput: lastResult?.stdout ?? "",
-        errors: lastResult?.errors ?? [],
-        screenshots: lastResult?.screenshots ?? [],
-        traces: lastResult?.traces ?? [],
     };
 }
 
@@ -148,6 +93,7 @@ interface PlaywrightResult {
     status: string;
     error?: { message?: string; stack?: string };
     errors?: Array<{ message?: string; stack?: string }>;
+    attachments?: Array<{ name?: string; contentType?: string; path?: string }>;
 }
 
 interface PlaywrightSuite {
@@ -159,18 +105,26 @@ interface PlaywrightSuite {
 
 interface PlaywrightJsonReport extends PlaywrightSuite {
     duration?: number;
+    stats?: { duration?: number };
     errors?: Array<{ message?: string; stack?: string }>;
 }
 
 function extractJsonReport(stdout: string): PlaywrightJsonReport | null {
-    try {
-        // Buscar el JSON report en la salida
-        const jsonMatch = stdout.match(/\{[\s\S]*"suites"[\s\S]*\}/);
-        if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]) as PlaywrightJsonReport;
+    // dotenv, npx o la aplicacion pueden imprimir objetos antes del reporter. Un
+    // regex greedy desde el primer "{" capturaria tambien esos banners y haria
+    // fallar JSON.parse. Prueba solo inicios plausibles del objeto raiz, del mas
+    // reciente al mas antiguo.
+    const starts = [...stdout.matchAll(/\{\s*"(?:config|suites)"\s*:/g)]
+        .map((match) => match.index)
+        .filter((index): index is number => index !== undefined)
+        .reverse();
+
+    for (const start of starts) {
+        try {
+            return JSON.parse(stdout.slice(start).trim()) as PlaywrightJsonReport;
+        } catch {
+            // Puede ser un objeto anidado; prueba el siguiente candidato.
         }
-    } catch {
-        // Ignorar errores de parsing
     }
     return null;
 }
@@ -189,6 +143,21 @@ function collectFailedResults(suite: PlaywrightSuite, out: PlaywrightResult[]): 
     for (const child of suite.suites ?? []) {
         collectFailedResults(child, out);
     }
+}
+
+function reportedArtifacts(
+    report: PlaywrightJsonReport | null,
+    matches: (attachment: NonNullable<PlaywrightResult["attachments"]>[number]) => boolean
+): string[] {
+    if (!report) return [];
+    const failed: PlaywrightResult[] = [];
+    collectFailedResults(report, failed);
+    return failed.flatMap((result) =>
+        (result.attachments ?? [])
+            .filter(matches)
+            .map((attachment) => attachment.path)
+            .filter((artifactPath): artifactPath is string => Boolean(artifactPath))
+    );
 }
 
 function parseTestErrors(rawOutput: string, jsonReport: PlaywrightJsonReport | null): TestError[] {
@@ -325,4 +294,8 @@ function findArtifacts(specRel: string, extension: string): string[] {
     }
 
     return artifacts;
+}
+
+function unique(values: string[]): string[] {
+    return [...new Set(values)];
 }

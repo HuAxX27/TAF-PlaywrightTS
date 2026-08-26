@@ -21,19 +21,19 @@ prueba realmente los usa.
 
 ## Comandos
 
-| Comando                           | Qué hace                                     |
-| --------------------------------- | -------------------------------------------- |
-| `npm test`                        | Corre toda la suite                          |
-| `npm run test:smoke`              | Solo `@smoke`                                |
-| `npm run test:regression`         | Solo `@regression`                           |
-| `npm run test:critical`           | Solo `@critical`                             |
-| `npm run test:report`             | Abre el reporte HTML                         |
-| `npm run typecheck`               | `tsc --noEmit`                               |
-| `npm run lint` / `lint:fix`       | ESLint                                       |
-| `npm run format` / `format:check` | Prettier                                     |
-| `npm run agent`                   | Asistente guiado para generar desde Xray     |
-| `npm run candidates`              | Estado y motivo de bloqueo de cada candidate |
-| `npm run promote`                 | Promoción guiada de uno o varios candidates  |
+| Comando                                    | Qué hace                                |
+| ------------------------------------------ | --------------------------------------- |
+| `npm test`                                 | Corre toda la suite                     |
+| `npm run test:smoke`                       | Solo `@smoke`                           |
+| `npm run test:regression`                  | Solo `@regression`                      |
+| `npm run test:critical`                    | Solo `@critical`                        |
+| `npm run test:report`                      | Abre el reporte HTML                    |
+| `npm run typecheck`                        | `tsc --noEmit`                          |
+| `npm run lint` / `lint:fix`                | ESLint                                  |
+| `npm run format` / `format:check`          | Prettier                                |
+| `npm run aqa:toolkit -- help`              | Helpers deterministas usados por Claude |
+| `npm run candidates`                       | Estado JSON de todos los candidates     |
+| `npm run promote -- --paths=... --confirm` | Promoción CLI transaccional             |
 
 ## Estructura
 
@@ -61,26 +61,26 @@ agent/          El agente AQA (ver agent/README.md)
 - Tags con la firma `test("titulo", { tag: ["@smoke"] }, async ({ ... }) => {})`.
 - Nada de `waitForTimeout`.
 
-## Agente AQA
+## Toolkit AQA con Claude Code
 
 ```bash
-npm run agent
+claude
 ```
 
-El asistente pregunta si deseas usar una clave, varias claves, un Test Plan o
-JQL. No es necesario aprender parámetros. Al finalizar, `npm run candidates`
-muestra qué archivos están listos y `npm run promote` permite seleccionar uno,
-varios, un rango o todos.
+Usa slash commands dentro de Claude:
 
-```
-Test Case(s) de Xray
-   → plan de automatización → inventario de tests (playwright test --list)
-   → análisis de cobertura   (LLM)  covered / partial / missing
-   → exploración en vivo guiada por el plan
-   → candidate + validación estática/E2E/revisión
+```text
+/aqa-generate PROJ-123
+/aqa-generate keys:PROJ-123,PROJ-124
+/aqa-generate plan:PROJ-PLAN-7
+/aqa-candidates
+/aqa-repair tests/candidates/ui/account/PROJ-123-profile.spec.ts
+/aqa-promote all
 ```
 
-El proveedor de IA es intercambiable desde el `.env` (`LLM_PROVIDER`). `codemie`
-es el proveedor productivo predeterminado.
+`/aqa-generate` coordina agentes optimizados: Opus para orquestación batch y validación final,
+Sonnet para análisis/codegen/reparación, y Haiku para clasificación mecánica.
+La obtención Xray, inventario, ejecución y promoción siguen siendo helpers
+TypeScript deterministas y auditables.
 
-- **[Guía operativa del agente Xray](agent/README.md)** — empieza aquí
+- **[Guía del toolkit Claude AQA](agent/README.md)** — arquitectura, comandos y operación

@@ -1,0 +1,56 @@
+{
+    "env": {
+        "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "3",
+        "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "6"
+    },
+    "permissions": {
+        "allow": [
+            "Bash(npm run --silent aqa:toolkit -- prepare *)",
+            "Bash(npm run --silent aqa:toolkit -- snapshot *)",
+            "Bash(npm run --silent aqa:toolkit -- fetch *)",
+            "Bash(npm run --silent aqa:toolkit -- classify *)",
+            "Bash(npm run --silent aqa:toolkit -- inventory *)",
+            "Bash(npm run --silent aqa:toolkit -- context *)",
+            "Bash(npm run --silent aqa:toolkit -- explore *)",
+            "Bash(npm run --silent aqa:toolkit -- validate *)",
+            "Bash(npm run --silent aqa:toolkit -- e2e *)",
+            "Bash(npm run --silent aqa:toolkit -- status)",
+            "Bash(npm run --silent aqa:toolkit -- knowledge-report)",
+            "Bash(npm run --silent aqa:toolkit -- knowledge-sanitize *)",
+            "Bash(npm run --silent aqa:toolkit -- knowledge-merge *)",
+            "Bash(npm run typecheck)",
+            "Bash(npm run lint *)",
+            "Bash(npm run format:check)",
+            "Bash(npx playwright test *)",
+            "PowerShell(npm run --silent aqa:toolkit -- prepare *)",
+            "PowerShell(npm run --silent aqa:toolkit -- snapshot *)",
+            "PowerShell(npm run --silent aqa:toolkit -- fetch *)",
+            "PowerShell(npm run --silent aqa:toolkit -- classify *)",
+            "PowerShell(npm run --silent aqa:toolkit -- inventory *)",
+            "PowerShell(npm run --silent aqa:toolkit -- context *)",
+            "PowerShell(npm run --silent aqa:toolkit -- explore *)",
+            "PowerShell(npm run --silent aqa:toolkit -- validate *)",
+            "PowerShell(npm run --silent aqa:toolkit -- e2e *)",
+            "PowerShell(npm run --silent aqa:toolkit -- status)",
+            "PowerShell(npm run --silent aqa:toolkit -- knowledge-report)",
+            "PowerShell(npm run --silent aqa:toolkit -- knowledge-sanitize *)",
+            "PowerShell(npm run --silent aqa:toolkit -- knowledge-merge *)",
+            "PowerShell(npm run typecheck)",
+            "PowerShell(npm run lint *)",
+            "PowerShell(npm run format:check)",
+            "PowerShell(npx playwright test *)"
+        ],
+        "ask": [
+            "Bash(npm run --silent aqa:toolkit -- promote *)",
+            "PowerShell(npm run --silent aqa:toolkit -- promote *)"
+        ],
+        "deny": [
+            "Read(./.env)",
+            "Read(./.env.local)",
+            "Read(./.auth/**)",
+            "Read(./playwright/.auth/**)",
+            "Bash(git push *)",
+            "PowerShell(git push *)"
+        ]
+    }
+}

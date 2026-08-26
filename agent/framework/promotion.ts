@@ -18,7 +18,7 @@ interface ManifestRecord extends ManifestEntry {
     modifiedAt: number;
 }
 
-export interface CandidateInfo {
+interface CandidateInfo {
     testCaseId: string;
     relativePath: string;
     absolutePath: string;
@@ -30,7 +30,7 @@ export interface CandidateInfo {
     reason?: string;
 }
 
-export interface PromotedCandidate {
+interface PromotedCandidate {
     testCaseId: string;
     source: string;
     target: string;

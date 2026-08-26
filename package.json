@@ -14,10 +14,9 @@
         "test:smoke": "playwright test --grep @smoke",
         "test:regression": "playwright test --grep @regression",
         "test:critical": "playwright test --grep @critical",
-        "agent": "tsx agent/cli.ts",
-        "promote": "tsx agent/cli.ts promote",
-        "candidates": "tsx agent/cli.ts candidates",
-        "agent:learning": "tsx agent/cli.ts --learning-report"
+        "aqa:toolkit": "tsx agent/toolkit-cli.ts",
+        "promote": "tsx agent/toolkit-cli.ts promote",
+        "candidates": "tsx agent/toolkit-cli.ts status"
     },
     "keywords": [],
     "author": "",
